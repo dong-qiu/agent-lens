@@ -1,0 +1,39 @@
+name: 'Agent Lens Build Reporter'
+description: 'Reports a build event with artifact hashes to Agent Lens.'
+branding:
+  icon: 'eye'
+  color: 'blue'
+
+inputs:
+  url:
+    description: 'Agent Lens server URL (no trailing slash). e.g. https://lens.example.com'
+    required: true
+  token:
+    description: 'Bearer token; matches the server''s AGENT_LENS_TOKEN. Empty = unauthenticated.'
+    required: false
+    default: ''
+  status:
+    description: 'Build status (e.g. success, failure, cancelled). Use ${{ job.status }}.'
+    required: false
+    default: ''
+  artifacts:
+    description: 'Newline-separated globs to hash. Each matched file is sha256''d and reported in payload.artifacts. Empty = no artifacts.'
+    required: false
+    default: ''
+  session-id:
+    description: 'Override session id. Default is github-build:<owner>/<repo>/<run_id>, which matches the M2-C-1 workflow_run webhook so both views share a session.'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Send build event
+      shell: bash
+      env:
+        AGENT_LENS_URL: ${{ inputs.url }}
+        AGENT_LENS_TOKEN: ${{ inputs.token }}
+        AGENT_LENS_STATUS: ${{ inputs.status }}
+        AGENT_LENS_ARTIFACTS: ${{ inputs.artifacts }}
+        AGENT_LENS_SESSION_ID: ${{ inputs['session-id'] }}
+      run: bash "${{ github.action_path }}/send.sh"

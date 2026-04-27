@@ -111,15 +111,29 @@ function summarize(event: Event): string {
       return parts.join(" · ");
     }
     case "BUILD": {
+      // Two payload shapes: workflow_run webhook (nested workflow_run
+      // object) vs. composite-action (flat fields with source flag).
       const run = (p.workflow_run ?? {}) as Record<string, unknown>;
-      const name = asString(run.name);
-      const status = asString(run.status);
-      const conclusion = asString(run.conclusion);
-      const sha = asString(run.head_sha).slice(0, 7);
-      const parts = [name].filter(Boolean);
-      const state = conclusion || status;
-      if (state) parts.push(state);
+      const isWebhook = Object.keys(run).length > 0;
+      if (isWebhook) {
+        const name = asString(run.name);
+        const status = asString(run.status);
+        const conclusion = asString(run.conclusion);
+        const sha = asString(run.head_sha).slice(0, 7);
+        const parts = [name].filter(Boolean);
+        const state = conclusion || status;
+        if (state) parts.push(state);
+        if (sha) parts.push(sha);
+        return parts.join(" · ");
+      }
+      const workflow = asString(p.workflow);
+      const status = asString(p.status);
+      const sha = asString(p.sha).slice(0, 7);
+      const artifacts = Array.isArray(p.artifacts) ? p.artifacts.length : 0;
+      const parts = [workflow].filter(Boolean);
+      if (status) parts.push(status);
       if (sha) parts.push(sha);
+      if (artifacts > 0) parts.push(`${artifacts} artifact${artifacts === 1 ? "" : "s"}`);
       return parts.join(" · ");
     }
     default:

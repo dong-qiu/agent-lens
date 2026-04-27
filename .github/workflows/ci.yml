@@ -81,6 +81,14 @@ jobs:
             exit 1
           fi
 
+  action-smoke:
+    name: composite action smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash actions/build/smoke_test.sh
+
   web:
     name: web build
     runs-on: ubuntu-latest
