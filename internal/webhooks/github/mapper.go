@@ -162,8 +162,18 @@ func mapPush(raw json.RawMessage, deliveryID string) (*ingest.WireEvent, error) 
 		return nil, fmt.Errorf("push missing repository.full_name or ref")
 	}
 
-	branch := strings.TrimPrefix(p.Ref, "refs/heads/")
-	branch = strings.TrimPrefix(branch, "refs/tags/")
+	// Strip exactly one of the known ref-type prefixes so a contrived
+	// branch name like "refs/tags/v1" pushed under refs/heads/ doesn't
+	// get its prefix stripped twice.
+	var branch string
+	switch {
+	case strings.HasPrefix(p.Ref, "refs/heads/"):
+		branch = strings.TrimPrefix(p.Ref, "refs/heads/")
+	case strings.HasPrefix(p.Ref, "refs/tags/"):
+		branch = strings.TrimPrefix(p.Ref, "refs/tags/")
+	default:
+		branch = p.Ref
+	}
 
 	actorID := p.Sender.Login
 	if actorID == "" {

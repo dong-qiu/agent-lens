@@ -421,3 +421,77 @@ func TestHandlerLinksReviewToCommitViaSharedRef(t *testing.T) {
 	// vertical-slice is covered by the linker package tests; here we
 	// just assert the refs match for downstream linking.
 }
+
+func TestHandlerReviewDuplicateReturns200(t *testing.T) {
+	st := store.NewMemory()
+	h := NewHandler("topsecret", ingest.NewHandler(st))
+
+	first := deliverEvent(t, h, "pull_request_review", []byte(samplePullRequestReview), "delivery-rdup", "topsecret")
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first delivery status = %d, want 202", first.Code)
+	}
+	second := deliverEvent(t, h, "pull_request_review", []byte(samplePullRequestReview), "delivery-rdup", "topsecret")
+	if second.Code != http.StatusOK {
+		t.Errorf("duplicate delivery status = %d, want 200", second.Code)
+	}
+	events, _ := st.ListBySession(context.Background(), "github-pr:acme/widget/42", 0)
+	if len(events) != 1 {
+		t.Errorf("duplicate review delivery created extra events: %d", len(events))
+	}
+}
+
+func TestHandlerPushDuplicateReturns200(t *testing.T) {
+	st := store.NewMemory()
+	h := NewHandler("topsecret", ingest.NewHandler(st))
+
+	first := deliverEvent(t, h, "push", []byte(samplePush), "delivery-pdup", "topsecret")
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first delivery status = %d, want 202", first.Code)
+	}
+	second := deliverEvent(t, h, "push", []byte(samplePush), "delivery-pdup", "topsecret")
+	if second.Code != http.StatusOK {
+		t.Errorf("duplicate delivery status = %d, want 200", second.Code)
+	}
+	events, _ := st.ListBySession(context.Background(), "github-push:acme/widget/main", 0)
+	if len(events) != 1 {
+		t.Errorf("duplicate push delivery created extra events: %d", len(events))
+	}
+}
+
+func TestMapPushTrimsExactlyOneRefPrefix(t *testing.T) {
+	// Branch literally named "refs/tags/v1" pushed under refs/heads/
+	// must keep its full name, not have the inner refs/tags/ stripped.
+	body := `{
+	  "ref": "refs/heads/refs/tags/v1",
+	  "after": "ffffffffffffffffffffffffffffffffffffffff",
+	  "deleted": false,
+	  "commits": [],
+	  "repository": {"full_name": "acme/widget"},
+	  "sender": {"login": "alice"}
+	}`
+	ev, err := mapPush([]byte(body), "delivery-x")
+	if err != nil {
+		t.Fatalf("map: %v", err)
+	}
+	if ev.SessionID != "github-push:acme/widget/refs/tags/v1" {
+		t.Errorf("session_id = %q, want preserved branch name", ev.SessionID)
+	}
+}
+
+func TestMapPushTagRef(t *testing.T) {
+	body := `{
+	  "ref": "refs/tags/v1.2.3",
+	  "after": "ffffffffffffffffffffffffffffffffffffffff",
+	  "deleted": false,
+	  "commits": [],
+	  "repository": {"full_name": "acme/widget"},
+	  "sender": {"login": "alice"}
+	}`
+	ev, err := mapPush([]byte(body), "delivery-x")
+	if err != nil {
+		t.Fatalf("map: %v", err)
+	}
+	if ev.SessionID != "github-push:acme/widget/v1.2.3" {
+		t.Errorf("session_id = %q", ev.SessionID)
+	}
+}
