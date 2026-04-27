@@ -137,12 +137,16 @@ func verifyAttestationCore(args []string, out io.Writer) error {
 		}
 	}
 
-	fmt.Fprintf(out,
+	if _, err := fmt.Fprintf(out,
 		"OK · payloadType %s · predicateType %s · keyid %s\n",
 		payloadType, stmt.PredicateType, pub.KeyID,
-	)
+	); err != nil {
+		return err
+	}
 	for _, s := range subjects {
-		fmt.Fprintf(out, "  subject: %s\n", s)
+		if _, err := fmt.Fprintf(out, "  subject: %s\n", s); err != nil {
+			return err
+		}
 	}
 	return nil
 }
