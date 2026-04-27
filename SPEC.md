@@ -1,7 +1,9 @@
 # Agent Lens — 项目 SPEC
 
-> 版本：v0.4（2026-04-27）
+> 版本：v0.5（2026-04-28）
 > 状态：草案 / 规划阶段
+>
+> v0.5 变更：把每轮交互的 token 用量纳入证据链。撤回 v0.4 §10.1/§17 关于"hook 路径不抓 token / stop_reason"的限制（已被 transcript 验证证伪）。**价格 / 费用估算明确排除在 v1 范围之外**——多厂商计费结构差异大,token 数才是审计相关原语。详见 `docs/ADR/0002-token-usage-and-cost.md`。
 
 ## 1. 项目愿景
 
@@ -44,6 +46,7 @@ Agent Lens 是面向 Coding Agent 的**可观测、可追溯、可审计**系统
 - **Link**：事件之间的因果或语义关联。
 - **Trace / Evidence Chain**：以某目标（如一次 deploy）为根，反向展开的全部上游事件。
 - **Attestation**：对一段 trace 的签名声明，按 in-toto DSSE 信封格式输出。
+- **TokenUsage**：单条 assistant 消息的 token 计量（input / output / cache_read / cache_write 5m / cache_write 1h / web_search / web_fetch + model + service_tier）。供应商无关 schema，vendor 字段标注来源。**v1 只记录 token 数，不计算费用**——多厂商计费结构差异大且易变,留给下游消费者按需自行计算。详见 ADR 0002。
 
 ## 6. 核心能力
 
@@ -88,6 +91,26 @@ Link {
   inferred_by: rule_id | manual
 }
 ```
+
+`payload.usage` 子对象（仅出现在由 assistant 消息派生的 `decision` / `thought` 事件，可选）：
+
+```
+TokenUsage {
+  vendor:                  "anthropic" | "openai" | ...
+  model:                   string                    // 厂商原始 model id
+  service_tier?:           string                    // standard / priority / batch
+  input_tokens:            int
+  output_tokens:           int
+  cache_read_tokens?:      int
+  cache_write_5m_tokens?:  int
+  cache_write_1h_tokens?:  int
+  web_search_calls?:       int
+  web_fetch_calls?:        int
+  raw?:                    object                    // 原始 vendor usage 块，留作 forensic re-parse
+}
+```
+
+v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / session 级聚合在 query 层做。映射规则、跨厂商抽象、为何不做费用详见 ADR 0002。
 
 ## 8. 系统架构
 
@@ -149,13 +172,16 @@ Link {
 
 **Thinking 捕获条件**：仅当 Claude Code 在该轮启用了 extended thinking，transcript 中才会有 `thinking` block 可读。本路径不主动开启该选项，也不强制其存在。
 
+**Token 用量与 stop_reason 捕获**：transcript 中每条 assistant 消息的 `message.usage` 块（input / output / cache_read / cache_creation 含 5m+1h 分桶 / server_tool_use 含 web_search+web_fetch / service_tier）以及 `message.model`、`message.stop_reason` 均被 transcript 旁路在 Stop hook 中提取，归一化为 §7 `payload.usage` 的 `TokenUsage` shape，挂在该消息派生的 `decision` / `thought` 事件上。验证基础与映射规则见 ADR 0002。原 v0.4 版本曾把这些字段列为本路径不抓、推迟到 §10.4 代理深模式——经实测撤回。
+
 **已知局限**：
 - Claude Code transcript jsonl 不是公开稳定契约，解析按 fail-soft：未识别行跳过，不中断流。最低支持版本随发版迭代标注于 README。
-- 本路径不抓取 token 用量、stop_reason 等流式细节。需要这些指标时切换 §10.4 的代理深模式。
+- `<synthetic>` 模型标记的消息（Claude Code 自身注入的 stop-sequence 占位，usage 全 0）按已知形态跳过 usage 提取，不报错、不丢消息体。
+- 仍**没有**的能力：实时拦截 / token 流式即时反馈 / policy gate。要这些得走 §10.4。
 
 ### 10.4 代理深模式（M4+，未启用）
 
-为获取实时 thinking、token 用量、policy gate 能力，未来可让 Claude Code 走 `ANTHROPIC_BASE_URL` 指向本机 Agent Lens proxy，由 proxy 拦截请求/响应再转发上游。复杂度高于 §10.1，故 v1 不启用；激活条件由独立 ADR 拍板。
+为获取实时拦截能力（流式 thinking 与 token 即时反馈、policy gate），未来可让 Claude Code 走 `ANTHROPIC_BASE_URL` 指向本机 Agent Lens proxy，由 proxy 拦截请求/响应再转发上游。复杂度高于 §10.1，故 v1 不启用；激活条件由独立 ADR 拍板。注意：**token 总量统计**已通过 §10.1 transcript 旁路覆盖，不再是 §10.4 的独占价值。
 
 ### 10.2 OpenCode（次发）
 - OpenCode 是开源 Coding Agent，预期通过其插件机制或 fork patch 注入 capture 层。
@@ -229,6 +255,7 @@ Link {
 | R4 | 私有代码的存储成本与保留策略：只存 diff 还是全文件 snapshot？ |
 | R5 | 与现有 OpenTelemetry-GenAI / Langfuse 等观测系统的关系：互补还是重叠？ |
 | R6 | attestation 的密钥管理：自托管下用本地 KMS 还是 Sigstore（需外网）？ |
+| R7 | 跨厂商 TokenUsage 可比性：OpenCode / Cursor / 自研 Agent 的 usage schema 不一致——尤其 cache 语义(Anthropic 是 TTL 分桶 + 写入按倍率,OpenAI 是缓存输入打折)无法用同一字段名表达。SDK 层定义最小公约数 `TokenUsage`(input / output 通用,cache 字段按需扩展),vendor 字段保留出处,聚合时按 vendor 分组而非强行求和。详见 ADR 0002 D2。 |
 
 ---
 
@@ -321,6 +348,6 @@ agent-lens/
 - Redaction 规则按 §12 默认策略走，不因 dogfood 放宽——thinking 文本尤其敏感，redaction 必须在 hook 出口处完成，不依赖 server。
 - 在 Lens UI 上把"Agent Lens 自身"作为一个 project 单独建模，避免与未来其他被观测项目混淆。
 
-**已具备的捕获深度**（截至 v0.4）：§10.1 的 hook 直采 + transcript 旁路使得激活后能拿到 prompt / 工具调用 / 工具结果 / thinking（启用 extended thinking 时）/ assistant 文本回复 / turn 边界。token 用量与流式细节要等 §10.4 代理深模式上线。
+**已具备的捕获深度**（截至 v0.5）：§10.1 的 hook 直采 + transcript 旁路使得激活后能拿到 prompt / 工具调用 / 工具结果 / thinking（启用 extended thinking 时）/ assistant 文本回复 / turn 边界 / **每条 assistant 消息的 token 用量与 stop_reason**（含 cache 5m/1h 分桶、server_tool_use 计数、service_tier、model）。仍要等 §10.4 代理深模式才能拿到的能力：实时拦截、流式 token 即时反馈、policy gate。
 
 **反馈回路**：dogfood 暴露的可用性问题以 issue 入仓，作为 M4+ 优先级输入。
