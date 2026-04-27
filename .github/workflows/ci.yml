@@ -55,6 +55,32 @@ jobs:
       # it only because of Colima socket-mount limits).
       - run: go test -tags integration -count=1 ./...
 
+  codegen-drift:
+    name: codegen drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+      - name: Regenerate protobuf bindings
+        run: buf generate
+      - name: Regenerate GraphQL bindings
+        working-directory: internal/query
+        run: go run github.com/99designs/gqlgen generate
+      - name: Fail if generated code drifted
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::Generated code is out of date. Run 'make proto && make gqlgen' locally and commit the result."
+            git diff --stat
+            exit 1
+          fi
+
   web:
     name: web build
     runs-on: ubuntu-latest
