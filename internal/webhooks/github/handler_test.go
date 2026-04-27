@@ -495,3 +495,112 @@ func TestMapPushTagRef(t *testing.T) {
 		t.Errorf("session_id = %q", ev.SessionID)
 	}
 }
+
+const sampleWorkflowRunCompleted = `{
+  "action": "completed",
+  "workflow_run": {
+    "id": 123456789,
+    "name": "CI",
+    "status": "completed",
+    "conclusion": "success",
+    "head_sha": "deadbeefcafe1234567890abcdef0123456789ab",
+    "head_branch": "main",
+    "html_url": "https://github.com/acme/widget/actions/runs/123456789",
+    "run_number": 42,
+    "run_attempt": 1,
+    "started_at": "2026-04-27T10:00:00Z",
+    "updated_at": "2026-04-27T10:05:00Z"
+  },
+  "repository": {"full_name": "acme/widget"},
+  "sender": {"login": "alice"}
+}`
+
+const sampleWorkflowRunInProgress = `{
+  "action": "in_progress",
+  "workflow_run": {
+    "id": 123456789,
+    "name": "CI",
+    "status": "in_progress",
+    "head_sha": "deadbeefcafe1234567890abcdef0123456789ab",
+    "head_branch": "main"
+  },
+  "repository": {"full_name": "acme/widget"},
+  "sender": {"login": "alice"}
+}`
+
+func TestMapWorkflowRun(t *testing.T) {
+	ev, err := mapWorkflowRun([]byte(sampleWorkflowRunCompleted), "delivery-wf-1")
+	if err != nil {
+		t.Fatalf("map: %v", err)
+	}
+	if ev.Kind != "build" {
+		t.Errorf("kind = %q, want build", ev.Kind)
+	}
+	if ev.SessionID != "github-build:acme/widget/123456789" {
+		t.Errorf("session_id = %q (must key on run id)", ev.SessionID)
+	}
+	if ev.ID != "delivery-wf-1" {
+		t.Errorf("id = %q, want delivery", ev.ID)
+	}
+	if ev.Actor.Type != "system" {
+		t.Errorf("actor.type = %q, want system", ev.Actor.Type)
+	}
+	if len(ev.Refs) != 1 || ev.Refs[0] != "git:deadbeefcafe1234567890abcdef0123456789ab" {
+		t.Errorf("refs = %+v", ev.Refs)
+	}
+}
+
+func TestHandlerDispatchesWorkflowRun(t *testing.T) {
+	st := store.NewMemory()
+	h := NewHandler("topsecret", ingest.NewHandler(st))
+
+	rec := deliverEvent(t, h, "workflow_run", []byte(sampleWorkflowRunCompleted), "delivery-wf-2", "topsecret")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", rec.Code)
+	}
+	events, _ := st.ListBySession(context.Background(), "github-build:acme/widget/123456789", 0)
+	if len(events) != 1 || events[0].Kind != "build" {
+		t.Errorf("events = %+v", events)
+	}
+}
+
+// TestWorkflowRunLifecycleStaysInOneSession verifies that the three
+// deliveries GitHub sends per run (requested / in_progress / completed)
+// all flow into the same per-run session even when they're decoded
+// from different payloads.
+func TestWorkflowRunLifecycleStaysInOneSession(t *testing.T) {
+	st := store.NewMemory()
+	h := NewHandler("topsecret", ingest.NewHandler(st))
+
+	deliveries := []struct {
+		body, deliveryID string
+	}{
+		{sampleWorkflowRunInProgress, "delivery-wf-progress"},
+		{sampleWorkflowRunCompleted, "delivery-wf-completed"},
+	}
+	for _, d := range deliveries {
+		rec := deliverEvent(t, h, "workflow_run", []byte(d.body), d.deliveryID, "topsecret")
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("delivery %s status = %d", d.deliveryID, rec.Code)
+		}
+	}
+
+	events, _ := st.ListBySession(context.Background(), "github-build:acme/widget/123456789", 0)
+	if len(events) != 2 {
+		t.Errorf("got %d events in run session, want 2", len(events))
+	}
+}
+
+func TestHandlerWorkflowRunDuplicateReturns200(t *testing.T) {
+	st := store.NewMemory()
+	h := NewHandler("topsecret", ingest.NewHandler(st))
+
+	first := deliverEvent(t, h, "workflow_run", []byte(sampleWorkflowRunCompleted), "delivery-wf-dup", "topsecret")
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first status = %d", first.Code)
+	}
+	second := deliverEvent(t, h, "workflow_run", []byte(sampleWorkflowRunCompleted), "delivery-wf-dup", "topsecret")
+	if second.Code != http.StatusOK {
+		t.Errorf("duplicate status = %d, want 200", second.Code)
+	}
+}

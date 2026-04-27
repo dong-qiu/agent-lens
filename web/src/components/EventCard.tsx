@@ -110,6 +110,18 @@ function summarize(event: Event): string {
       if (commits > 0) parts.push(`${commits} commit${commits === 1 ? "" : "s"}`);
       return parts.join(" · ");
     }
+    case "BUILD": {
+      const run = (p.workflow_run ?? {}) as Record<string, unknown>;
+      const name = asString(run.name);
+      const status = asString(run.status);
+      const conclusion = asString(run.conclusion);
+      const sha = asString(run.head_sha).slice(0, 7);
+      const parts = [name].filter(Boolean);
+      const state = conclusion || status;
+      if (state) parts.push(state);
+      if (sha) parts.push(sha);
+      return parts.join(" · ");
+    }
     default:
       return "";
   }
