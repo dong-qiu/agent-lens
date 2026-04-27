@@ -13,16 +13,12 @@ import (
 
 // DeployEvidencePredicate identifies the v1 deploy attestation produced
 // by Agent Lens. Subject of a deploy-evidence is the container image.
-const (
-	DeployEvidencePredicate = "agent-lens.dev/deploy-evidence/v1"
-	DeployEvidenceBuildType = "https://agent-lens.dev/deploy-evidence/v1"
-)
+const DeployEvidencePredicate = "agent-lens.dev/deploy-evidence/v1"
 
 // DeployEvidence is the v1 predicate body. It records the deploy
 // itself plus hashes of upstream attestations (build / code) so a
 // verifier can walk the attestation graph from deploy → build → code.
 type DeployEvidence struct {
-	BuildType        string         `json:"buildType"`
 	Environment      string         `json:"environment"`
 	Platform         string         `json:"platform,omitempty"`
 	Cluster          string         `json:"cluster,omitempty"`
@@ -36,9 +32,10 @@ type DeployEvidence struct {
 }
 
 // DeployUpstream holds digest pointers back to the build and code
-// attestations that authorized this deploy. \`sha256:<hex>\` form. Empty
-// values mean the deployer didn't attach the corresponding upstream;
-// verifiers should treat that as reduced assurance, not silent ok.
+// attestations that authorized this deploy. Format is sha256:<hex>.
+// Empty values mean the deployer didn't attach the corresponding
+// upstream; verifiers should treat that as reduced assurance rather
+// than silent ok.
 type DeployUpstream struct {
 	BuildAttestationDigest string `json:"build_attestation,omitempty"`
 	CodeAttestationDigest  string `json:"code_attestation,omitempty"`
@@ -86,7 +83,6 @@ func BuildDeployEvidenceStatement(in DeployEvidenceInputs) (*Statement, error) {
 	}
 
 	pred := DeployEvidence{
-		BuildType:   DeployEvidenceBuildType,
 		Environment: in.Environment,
 		Platform:    in.Platform,
 		Cluster:     in.Cluster,

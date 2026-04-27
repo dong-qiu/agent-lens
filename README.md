@@ -146,7 +146,9 @@ agent-lens-hook export deploy-evidence \
 - `--build-attestation` / `--code-attestation` 都是可选；命令会对文件做 sha256 然后写到 `predicate.upstream.{build,code}_attestation`，供 verifier 顺着 deploy → build → code 走完证据图。不传就是空字符串，相当于明示"上游证据缺失"。
 - `predicate.trace_root_event_id` 默认就是 deploy event 自身的 id；查 store 时直接当入口。
 
-事件 id 可以从 `/webhooks/deploy` 的响应 header / 服务端日志里捞，也可以用 GraphQL `events(sessionId:"deploy:<env>")` 查 session 时间线，参考 [`examples/`](./examples/) 里的脚本。
+查事件 id 的两种方式：
+- POST `/webhooks/deploy` 时带 `Idempotency-Key: <ulid>`——这个 key 同时被服务器当成 event id 用，客户端预生成、自己留底。
+- 没设 `Idempotency-Key` 时只能事后用 GraphQL `events(sessionId: "deploy:<env>", limit: 10)` 查时间线（响应里的 `id` 字段）。
 
 ## 校验 attestation
 

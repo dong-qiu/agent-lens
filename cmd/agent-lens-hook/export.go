@@ -796,9 +796,9 @@ func buildDeployInputsFromEvent(ev *fetchEventResponse, storeURL string) attest.
 	if v, _ := p["git_sha"].(string); v != "" {
 		in.GitCommit = v
 	}
-	// finished_at preferred, fall back to started_at, fall back to
-	// the deploy event's wall-clock id-bearing time isn't available
-	// here without re-querying.
+	// finished_at preferred, started_at as fallback. The event's own ts
+	// would be a third fallback but it isn't on this GraphQL response;
+	// re-querying for it is more cost than the field is worth.
 	if v, _ := p["finished_at"].(string); v != "" {
 		in.DeployedAt = v
 	} else if v, _ := p["started_at"].(string); v != "" {
