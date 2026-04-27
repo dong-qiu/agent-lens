@@ -227,3 +227,148 @@ func TestProvenanceSessionFromEventsPicksFirstAgentModel(t *testing.T) {
 
 // silence unused import warnings if context is dropped from any test
 var _ = context.Background
+
+func TestExportCodeProvenanceRepoAppearsInSubjectName(t *testing.T) {
+	st := store.NewMemory()
+	r := chi.NewRouter()
+	r.Route("/v1", func(sub chi.Router) {
+		ingest.RegisterRoutes(sub, st)
+		query.RegisterRoutes(sub, st)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	body := `{"session_id":"s-repo","actor":{"type":"human","id":"alice"},"kind":"prompt","payload":{"text":"hi"}}`
+	resp, err := http.Post(srv.URL+"/v1/events", "application/x-ndjson", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519")
+	priv, pub, _ := attest.GenerateKey()
+	_ = attest.SaveKeyPair(keyPath, priv)
+
+	var buf bytes.Buffer
+	args := []string{
+		"--commit", "abc",
+		"--session", "s-repo",
+		"--repo", "https://github.com/acme/widget",
+		"--key", keyPath,
+		"--url", srv.URL,
+	}
+	if err := exportCodeProvenance(args, &buf); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	var env attest.Envelope
+	_ = json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &env)
+	payload, _, err := attest.Verify(pub, &env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stmt attest.Statement
+	_ = json.Unmarshal(payload, &stmt)
+	if stmt.Subject[0].Name != "git+https://github.com/acme/widget" {
+		t.Errorf("subject name = %q, want %q", stmt.Subject[0].Name, "git+https://github.com/acme/widget")
+	}
+}
+
+func TestExportCodeProvenanceLimitCapErrors(t *testing.T) {
+	st := store.NewMemory()
+	r := chi.NewRouter()
+	r.Route("/v1", func(sub chi.Router) {
+		ingest.RegisterRoutes(sub, st)
+		query.RegisterRoutes(sub, st)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	// Post 3 events; use --limit 2 to force the cap.
+	body := strings.Join([]string{
+		`{"session_id":"s-cap","actor":{"type":"human","id":"alice"},"kind":"prompt","payload":{"text":"a"}}`,
+		`{"session_id":"s-cap","actor":{"type":"human","id":"alice"},"kind":"prompt","payload":{"text":"b"}}`,
+		`{"session_id":"s-cap","actor":{"type":"human","id":"alice"},"kind":"prompt","payload":{"text":"c"}}`,
+	}, "\n")
+	resp, err := http.Post(srv.URL+"/v1/events", "application/x-ndjson", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519")
+	priv, _, _ := attest.GenerateKey()
+	_ = attest.SaveKeyPair(keyPath, priv)
+
+	var buf bytes.Buffer
+	args := []string{
+		"--commit", "abc",
+		"--session", "s-cap",
+		"--limit", "2",
+		"--key", keyPath,
+		"--url", srv.URL,
+	}
+	err = exportCodeProvenance(args, &buf)
+	if err == nil {
+		t.Fatal("expected error when --limit cap is hit, got nil")
+	}
+	if !strings.Contains(err.Error(), "limit") {
+		t.Errorf("error didn't mention limit: %v", err)
+	}
+}
+
+func TestExportCodeProvenanceClientSortsByTS(t *testing.T) {
+	// Defense-against-server-contract test: feed events whose TS are
+	// in store-insertion order but lexicographically increasing, then
+	// verify the predicate's metadata.started_at == earliest TS even
+	// after our client-side sort runs.
+	st := store.NewMemory()
+	r := chi.NewRouter()
+	r.Route("/v1", func(sub chi.Router) {
+		ingest.RegisterRoutes(sub, st)
+		query.RegisterRoutes(sub, st)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	// Three events; first inserted has the latest ts. Server's
+	// ListBySession orders by ts ASC so we'd get them ts-sorted
+	// anyway, but the test pins client-side sort by inspecting the
+	// derived metadata.
+	body := strings.Join([]string{
+		`{"ts":"2026-04-27T10:00:30Z","session_id":"s-sort","actor":{"type":"human","id":"alice"},"kind":"prompt","payload":{"text":"third"}}`,
+		`{"ts":"2026-04-27T10:00:10Z","session_id":"s-sort","actor":{"type":"human","id":"alice"},"kind":"prompt","payload":{"text":"first"}}`,
+		`{"ts":"2026-04-27T10:00:20Z","session_id":"s-sort","actor":{"type":"human","id":"alice"},"kind":"prompt","payload":{"text":"second"}}`,
+	}, "\n")
+	resp, err := http.Post(srv.URL+"/v1/events", "application/x-ndjson", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519")
+	priv, pub, _ := attest.GenerateKey()
+	_ = attest.SaveKeyPair(keyPath, priv)
+
+	var buf bytes.Buffer
+	args := []string{"--commit", "abc", "--session", "s-sort", "--key", keyPath, "--url", srv.URL}
+	if err := exportCodeProvenance(args, &buf); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	var env attest.Envelope
+	_ = json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &env)
+	payload, _, _ := attest.Verify(pub, &env)
+	var stmt attest.Statement
+	_ = json.Unmarshal(payload, &stmt)
+	var pred attest.CodeProvenance
+	_ = json.Unmarshal(stmt.Predicate, &pred)
+
+	if pred.Metadata.StartedAt != "2026-04-27T10:00:10Z" {
+		t.Errorf("started_at = %q, want earliest 10:00:10", pred.Metadata.StartedAt)
+	}
+	if pred.Metadata.EndedAt != "2026-04-27T10:00:30Z" {
+		t.Errorf("ended_at = %q, want latest 10:00:30", pred.Metadata.EndedAt)
+	}
+}

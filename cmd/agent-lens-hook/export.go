@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/dongqiu/agent-lens/internal/attest"
@@ -67,12 +68,18 @@ Usage:
              prompt / thought / tool_call events that produced the
              commit. v0 is manual; auto-correlation between commits
              and Claude sessions is a follow-up
+  --repo     repo identifier for the in-toto subject name; emitted as
+             "git+<repo>". Default empty falls back to "git"
+             (uninformative; consider passing the repo URL)
   --key      ed25519 private key path
              (default $HOME/.agent-lens/keys/ed25519)
   --out      output file (default stdout)
   --url      Agent Lens server URL
              (default $AGENT_LENS_URL or http://localhost:8787)
   --token    bearer token (default $AGENT_LENS_TOKEN)
+  --limit    max events to fetch (default 5000); the command errors
+             rather than truncates if the cap is hit, since a partial
+             predicate would silently misrepresent the trace
   --timeout  HTTP timeout for the GraphQL fetch (default 30s)
 
 Output is one JSON-encoded DSSE envelope, suitable for appending to
@@ -88,10 +95,12 @@ func exportCodeProvenance(args []string, out io.Writer) error {
 	var (
 		commit    = fs.String("commit", "", "git commit SHA (required)")
 		session   = fs.String("session", "", "Claude Code session id (required)")
+		repoFlag  = fs.String("repo", "", "repo identifier for the in-toto subject name")
 		keyPath   = fs.String("key", "", "ed25519 private key path")
 		outPath   = fs.String("out", "", "output file (default stdout)")
 		urlFlag   = fs.String("url", "", "server URL")
 		tokenFlag = fs.String("token", "", "bearer token")
+		limit     = fs.Int("limit", 5000, "max events to fetch from the session")
 		timeout   = fs.Duration("timeout", 30*time.Second, "HTTP timeout")
 	)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, codeProvenanceUsage) }
@@ -118,21 +127,42 @@ func exportCodeProvenance(args []string, out io.Writer) error {
 
 	url := chooseURL(*urlFlag)
 	token := chooseToken(*tokenFlag)
-	events, err := fetchProvenanceEvents(url, token, *session, *timeout)
+	events, err := fetchProvenanceEvents(url, token, *session, *limit, *timeout)
 	if err != nil {
 		return fmt.Errorf("fetch session events: %w", err)
 	}
 	if len(events) == 0 {
 		return fmt.Errorf("session %q has no events", *session)
 	}
+	if *limit > 0 && len(events) >= *limit {
+		// Hitting the cap means the session probably has more events
+		// than we fetched. A truncated predicate would silently
+		// misrepresent the trace, which defeats the audit goal —
+		// error out and let the operator raise --limit.
+		return fmt.Errorf("session %q hit the --limit cap (%d events); rerun with --limit larger to ensure a complete attestation", *session, *limit)
+	}
+
+	// Defense against future server contract drift: ListBySession
+	// returns events ordered by ts ASC, but client-side sort guards
+	// the metadata we derive (started_at = first event, ended_at =
+	// last) and the predicate's events array against any drift.
+	sort.SliceStable(events, func(i, j int) bool {
+		return events[i].TS < events[j].TS
+	})
 
 	pEvents := mapToProvenanceEvents(events)
 	if len(pEvents) == 0 {
 		return fmt.Errorf("session %q has no AI-side events (PROMPT/THOUGHT/TOOL_CALL/TOOL_RESULT/DECISION)", *session)
 	}
 
+	subjectName := "git"
+	if *repoFlag != "" {
+		subjectName = "git+" + *repoFlag
+	}
+
 	stmt, err := attest.BuildCodeProvenanceStatement(
 		*commit,
+		subjectName,
 		provenanceSessionFromEvents(*session, events),
 		pEvents,
 		url,
@@ -188,8 +218,8 @@ type provenanceActor struct {
 	Model string `json:"model"`
 }
 
-const provenanceQuery = `query Provenance($sessionId: String!) {
-  events(sessionId: $sessionId, limit: 1000) {
+const provenanceQuery = `query Provenance($sessionId: String!, $limit: Int) {
+  events(sessionId: $sessionId, limit: $limit) {
     id
     ts
     kind
@@ -198,7 +228,7 @@ const provenanceQuery = `query Provenance($sessionId: String!) {
   }
 }`
 
-func fetchProvenanceEvents(url, token, sessionID string, timeout time.Duration) ([]provenanceEvent, error) {
+func fetchProvenanceEvents(url, token, sessionID string, limit int, timeout time.Duration) ([]provenanceEvent, error) {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
@@ -206,6 +236,7 @@ func fetchProvenanceEvents(url, token, sessionID string, timeout time.Duration) 
 		"query": provenanceQuery,
 		"variables": map[string]any{
 			"sessionId": sessionID,
+			"limit":     limit,
 		},
 	})
 	if err != nil {

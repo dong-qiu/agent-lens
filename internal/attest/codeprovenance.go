@@ -87,11 +87,17 @@ type ProvenanceMetadata struct {
 // digest name for git commits) and whose predicate is the v1
 // code-provenance shape.
 //
+// subjectName identifies the repo for the auditor. Pass something
+// like "git+https://github.com/acme/widget" or any URI that names
+// the source. Empty string falls back to "git" — uninformative but
+// preserves backward compatibility with attestations made before this
+// argument existed.
+//
 // The events slice should already be filtered to AI-side events
 // (PROMPT / THOUGHT / TOOL_CALL / TOOL_RESULT / DECISION) and sorted
 // by ts. Started/ended metadata is taken from the first/last event.
 func BuildCodeProvenanceStatement(
-	commit string,
+	commit, subjectName string,
 	session ProvenanceSession,
 	events []ProvenanceEvent,
 	storeURL, rootEventID string,
@@ -101,6 +107,9 @@ func BuildCodeProvenanceStatement(
 	}
 	if len(events) == 0 {
 		return nil, errors.New("no events; nothing to attest")
+	}
+	if subjectName == "" {
+		subjectName = "git"
 	}
 
 	pred := CodeProvenance{
@@ -123,7 +132,7 @@ func BuildCodeProvenanceStatement(
 		Type: InTotoStatementType,
 		Subject: []Subject{
 			{
-				Name:   "git+local",
+				Name:   subjectName,
 				Digest: map[string]string{"gitCommit": commit},
 			},
 		},

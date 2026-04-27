@@ -14,6 +14,7 @@ func TestBuildCodeProvenanceStatementHappyPath(t *testing.T) {
 	}
 	stmt, err := BuildCodeProvenanceStatement(
 		"deadbeefcafe",
+		"git+https://github.com/acme/widget",
 		ProvenanceSession{ID: "s1", Agent: "claude-code", Model: "claude-opus-4-7"},
 		events,
 		"https://lens.example.com",
@@ -34,6 +35,9 @@ func TestBuildCodeProvenanceStatementHappyPath(t *testing.T) {
 	}
 	if stmt.Subject[0].Digest["gitCommit"] != "deadbeefcafe" {
 		t.Errorf("subject digest = %+v", stmt.Subject[0].Digest)
+	}
+	if stmt.Subject[0].Name != "git+https://github.com/acme/widget" {
+		t.Errorf("subject name = %q, want repo URL", stmt.Subject[0].Name)
 	}
 
 	var pred CodeProvenance
@@ -61,11 +65,27 @@ func TestBuildCodeProvenanceStatementHappyPath(t *testing.T) {
 }
 
 func TestBuildCodeProvenanceStatementRejectsEmptyInput(t *testing.T) {
-	if _, err := BuildCodeProvenanceStatement("", ProvenanceSession{}, []ProvenanceEvent{{ID: "x"}}, "", ""); err == nil {
+	if _, err := BuildCodeProvenanceStatement("", "git", ProvenanceSession{}, []ProvenanceEvent{{ID: "x"}}, "", ""); err == nil {
 		t.Error("accepted empty commit")
 	}
-	if _, err := BuildCodeProvenanceStatement("abc", ProvenanceSession{}, nil, "", ""); err == nil {
+	if _, err := BuildCodeProvenanceStatement("abc", "git", ProvenanceSession{}, nil, "", ""); err == nil {
 		t.Error("accepted empty events")
+	}
+}
+
+func TestBuildCodeProvenanceStatementSubjectNameFallback(t *testing.T) {
+	stmt, err := BuildCodeProvenanceStatement(
+		"abc",
+		"", // empty subject name
+		ProvenanceSession{ID: "s1"},
+		[]ProvenanceEvent{{ID: "e1", TS: "t", Kind: "PROMPT"}},
+		"", "e1",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stmt.Subject[0].Name != "git" {
+		t.Errorf("empty subjectName fallback = %q, want %q", stmt.Subject[0].Name, "git")
 	}
 }
 
@@ -114,6 +134,7 @@ func TestSummarizeTextEmpty(t *testing.T) {
 func TestStatementJSONRoundTrip(t *testing.T) {
 	stmt, err := BuildCodeProvenanceStatement(
 		"abc",
+		"git+example.com/r",
 		ProvenanceSession{ID: "s1", Agent: "claude-code"},
 		[]ProvenanceEvent{{ID: "e1", TS: "t", Kind: "PROMPT"}},
 		"", "e1",
