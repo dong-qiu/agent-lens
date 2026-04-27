@@ -110,6 +110,17 @@ function summarize(event: Event): string {
       if (commits > 0) parts.push(`${commits} commit${commits === 1 ? "" : "s"}`);
       return parts.join(" · ");
     }
+    case "DEPLOY": {
+      const env = asString(p.environment);
+      const status = asString(p.status);
+      const platform = asString(p.platform);
+      const sha = asString(p.git_sha).slice(0, 7);
+      const parts = [env].filter(Boolean);
+      if (status) parts.push(status);
+      if (sha) parts.push(sha);
+      if (platform) parts.push(platform);
+      return parts.join(" · ");
+    }
     case "BUILD": {
       // Two payload shapes: workflow_run webhook (nested workflow_run
       // object) vs. composite-action (flat fields with source flag).
