@@ -22,6 +22,9 @@ func (m *Memory) Close() error { return nil }
 func (m *Memory) AppendEvent(_ context.Context, e *Event) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if _, exists := m.byID[e.ID]; exists {
+		return ErrDuplicate
+	}
 	cp := *e
 	m.events = append(m.events, &cp)
 	m.byID[cp.ID] = &cp

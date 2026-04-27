@@ -20,7 +20,8 @@ make migrate-up
 
 # 3. 起后端（terminal 1）
 make build && ./bin/agent-lens
-# 监听 :8787，提供 /healthz, /v1/events (POST), /v1/graphql, /v1/playground
+# 监听 :8787，提供 /healthz, /v1/events (POST), /v1/graphql
+# /v1/playground 仅在 AGENT_LENS_PLAYGROUND=true 时挂载
 
 # 4. 起前端（terminal 2）
 make web-install   # 首次
@@ -63,9 +64,17 @@ make web-build         # TS 类型检查 + Vite 打包
 }
 ```
 
-环境变量：
+### 环境变量
+
+**Server (`agent-lens`)**
+- `AGENT_LENS_ADDR`（默认 `:8787`）
+- `AGENT_LENS_PG_DSN`（默认本地 compose 配置）
+- `AGENT_LENS_TOKEN`：bearer token；空则 `/v1` 不鉴权（dev 默认）。配置后 hook 与浏览器都需带 `Authorization: Bearer <token>`
+- `AGENT_LENS_PLAYGROUND`：设为 `true` 才挂载 `/v1/playground`（默认 off，避免生产暴露 introspection）
+
+**Hook (`agent-lens-hook`)**
 - `AGENT_LENS_URL`（默认 `http://localhost:8787`）
-- `AGENT_LENS_TOKEN`（可选 bearer token）
+- `AGENT_LENS_TOKEN`（同 server，作为 bearer token 发送）
 - `AGENT_LENS_CURSOR_DIR`（默认 `~/.agent-lens/cursors`，存 transcript 增量读 cursor）
 
 Stop hook 会读 `transcript_path` 提取 `thinking` / `text` content blocks（仅当本轮启用 extended thinking 时有 thinking）。HTTP 失败时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink。

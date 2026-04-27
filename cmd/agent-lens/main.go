@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/dongqiu/agent-lens/internal/auth"
 	"github.com/dongqiu/agent-lens/internal/ingest"
 	"github.com/dongqiu/agent-lens/internal/query"
 	"github.com/dongqiu/agent-lens/internal/store"
@@ -45,7 +46,12 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 	})
 
+	token := os.Getenv("AGENT_LENS_TOKEN")
+	if token == "" {
+		slog.Warn("AGENT_LENS_TOKEN is empty; /v1 endpoints are unauthenticated")
+	}
 	r.Route("/v1", func(sub chi.Router) {
+		sub.Use(auth.RequireToken(token))
 		ingest.RegisterRoutes(sub, st)
 		query.RegisterRoutes(sub, st)
 	})

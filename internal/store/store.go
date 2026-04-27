@@ -6,7 +6,10 @@ import (
 	"time"
 )
 
-var ErrNotFound = errors.New("event not found")
+var (
+	ErrNotFound  = errors.New("event not found")
+	ErrDuplicate = errors.New("event id already exists")
+)
 
 // Event is the storage-layer representation. It mirrors proto/event.proto but
 // keeps payload as raw JSON so the store does not depend on generated pb.

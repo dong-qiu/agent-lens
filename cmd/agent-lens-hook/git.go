@@ -59,7 +59,7 @@ func buildGitCommitEvent(workdir string) (map[string]any, error) {
 	if parentsLine != "" {
 		parents = strings.Fields(parentsLine)
 	}
-	files, _ := gitChangedFiles(workdir, sha, len(parents) == 0)
+	files, _ := gitChangedFiles(workdir, sha)
 
 	return map[string]any{
 		"ts":         time.Now().UTC().Format(time.RFC3339Nano),
@@ -88,12 +88,10 @@ type changedFile struct {
 	Path   string `json:"path"`
 }
 
-// gitChangedFiles lists the files touched by sha. For root commits
-// (no parent), `git diff-tree -r` against the empty tree is required;
-// we use `git show --name-status --pretty=format:` instead which handles
-// both cases uniformly.
-func gitChangedFiles(workdir, sha string, isRoot bool) ([]changedFile, error) {
-	_ = isRoot
+// gitChangedFiles lists the files touched by sha. `git show
+// --name-status --pretty=format:` handles both root and non-root
+// commits uniformly, unlike `git diff-tree` which needs a parent.
+func gitChangedFiles(workdir, sha string) ([]changedFile, error) {
 	out, err := gitOutput(workdir, "show", "--name-status", "--pretty=format:", sha)
 	if err != nil {
 		return nil, err

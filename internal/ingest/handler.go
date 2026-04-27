@@ -1,11 +1,20 @@
 // Package ingest accepts NDJSON event streams over HTTP and persists them
 // via store.Store. Each line in the request body is one JSON event.
+//
+// Concurrency model: a single handler-wide mutex serializes the
+// "load head → compute hash → append → update cache" sequence so
+// concurrent appends to the same session never fork the chain. The
+// trade-off is that all sessions share one writer; for v1 single-node
+// throughput this is acceptable. Per-session locking is a future
+// optimization, tracked separately.
 package ingest
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -18,7 +27,27 @@ import (
 	"github.com/dongqiu/agent-lens/internal/store"
 )
 
-var errMissingField = errors.New("missing required field (session_id, kind, actor.type)")
+var (
+	errMissingField = errors.New("missing required field (session_id, kind, actor.type)")
+	errInvalidKind  = errors.New("invalid kind")
+)
+
+// validKinds is the canonical lowercase set accepted on the wire. New
+// kinds must also be added to proto/event.proto and the GraphQL enum.
+var validKinds = map[string]struct{}{
+	"prompt":      {},
+	"thought":     {},
+	"tool_call":   {},
+	"tool_result": {},
+	"code_change": {},
+	"commit":      {},
+	"pr":          {},
+	"test_run":    {},
+	"build":       {},
+	"deploy":      {},
+	"review":      {},
+	"decision":    {},
+}
 
 // RegisterRoutes wires the ingest endpoints onto r. It is the primary
 // entry point used by the main server. NewRouter wraps it for tests and
@@ -37,7 +66,7 @@ func NewRouter(st store.Store) http.Handler {
 type handler struct {
 	st    store.Store
 	mu    sync.Mutex
-	heads map[string]string // session_id -> head hash, in-memory cache
+	heads map[string]string // session_id -> last appended hash; cache backed by store.HeadHash
 }
 
 // wireEvent is the JSON shape accepted on the wire. It mirrors
@@ -77,14 +106,8 @@ func (h *handler) ingest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad ndjson line: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		stored, err := h.toStoreEvent(&ev)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := h.st.AppendEvent(r.Context(), stored); err != nil {
-			slog.Error("append event", "err", err)
-			http.Error(w, "store error", http.StatusInternalServerError)
+		if err := h.appendOne(r.Context(), &ev); err != nil {
+			h.writeAppendError(w, err)
 			return
 		}
 		accepted++
@@ -98,9 +121,12 @@ func (h *handler) ingest(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"accepted": accepted})
 }
 
-func (h *handler) toStoreEvent(in *wireEvent) (*store.Event, error) {
-	if in.SessionID == "" || in.Kind == "" || in.Actor.Type == "" {
-		return nil, errMissingField
+// appendOne validates an event, computes its hash chain entry, persists
+// it, and advances the in-memory head cache — all under a single lock so
+// concurrent writes to the same session can't fork the chain.
+func (h *handler) appendOne(ctx context.Context, in *wireEvent) error {
+	if err := validateWireEvent(in); err != nil {
+		return err
 	}
 	if in.ID == "" {
 		in.ID = ulid.Make().String()
@@ -110,20 +136,24 @@ func (h *handler) toStoreEvent(in *wireEvent) (*store.Event, error) {
 	}
 
 	h.mu.Lock()
-	prev := h.heads[in.SessionID]
-	h.mu.Unlock()
+	defer h.mu.Unlock()
+
+	prev, hit := h.heads[in.SessionID]
+	if !hit {
+		loaded, err := h.st.HeadHash(ctx, in.SessionID)
+		if err != nil {
+			return fmt.Errorf("load head: %w", err)
+		}
+		prev = loaded
+	}
 
 	canonical, err := json.Marshal(in)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	hash := hashchain.Compute(prev, canonical)
 
-	h.mu.Lock()
-	h.heads[in.SessionID] = hash
-	h.mu.Unlock()
-
-	return &store.Event{
+	ev := &store.Event{
 		ID:         in.ID,
 		TS:         in.TS,
 		SessionID:  in.SessionID,
@@ -137,6 +167,34 @@ func (h *handler) toStoreEvent(in *wireEvent) (*store.Event, error) {
 		Refs:       in.Refs,
 		Hash:       hash,
 		PrevHash:   prev,
-	}, nil
+	}
+	if err := h.st.AppendEvent(ctx, ev); err != nil {
+		// Cache is intentionally not updated on append failure so the
+		// next attempt re-reads the actual head.
+		return err
+	}
+	h.heads[in.SessionID] = hash
+	return nil
 }
 
+func validateWireEvent(in *wireEvent) error {
+	if in.SessionID == "" || in.Kind == "" || in.Actor.Type == "" {
+		return errMissingField
+	}
+	if _, ok := validKinds[in.Kind]; !ok {
+		return errInvalidKind
+	}
+	return nil
+}
+
+func (h *handler) writeAppendError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errMissingField), errors.Is(err, errInvalidKind):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, store.ErrDuplicate):
+		http.Error(w, err.Error(), http.StatusConflict)
+	default:
+		slog.Error("ingest append", "err", err)
+		http.Error(w, "store error", http.StatusInternalServerError)
+	}
+}

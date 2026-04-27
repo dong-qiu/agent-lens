@@ -108,3 +108,91 @@ func TestIngestPreservesSubmittedID(t *testing.T) {
 		t.Errorf("id = %q, want %q", got.ID, "01HSAMPLE")
 	}
 }
+
+// TestIngestRecoversHashChainAfterRestart guards the handler's in-memory
+// head cache against forking the chain when the process restarts.
+func TestIngestRecoversHashChainAfterRestart(t *testing.T) {
+	st := store.NewMemory()
+
+	srv1 := httptest.NewServer(NewRouter(st))
+	body1 := `{"session_id":"s-restart","actor":{"type":"human","id":"alice"},"kind":"prompt","payload":{"text":"a"}}`
+	resp, err := http.Post(srv1.URL+"/events", "application/x-ndjson", strings.NewReader(body1))
+	if err != nil {
+		t.Fatalf("first post: %v", err)
+	}
+	resp.Body.Close()
+	srv1.Close()
+
+	// Fresh handler: cache is empty, but the store still has the prior event.
+	srv2 := httptest.NewServer(NewRouter(st))
+	defer srv2.Close()
+	body2 := `{"session_id":"s-restart","actor":{"type":"human","id":"alice"},"kind":"prompt","payload":{"text":"b"}}`
+	resp, err = http.Post(srv2.URL+"/events", "application/x-ndjson", strings.NewReader(body2))
+	if err != nil {
+		t.Fatalf("second post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+
+	events, err := st.ListBySession(context.Background(), "s-restart", 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("got %d events, want 2", len(events))
+	}
+	if events[1].PrevHash != events[0].Hash {
+		t.Errorf("chain forked across restart: prev=%q want %q", events[1].PrevHash, events[0].Hash)
+	}
+}
+
+func TestIngestRejectsInvalidKind(t *testing.T) {
+	st := store.NewMemory()
+	srv := httptest.NewServer(NewRouter(st))
+	defer srv.Close()
+
+	body := `{"session_id":"s1","actor":{"type":"human","id":"alice"},"kind":"bogus"}`
+	resp, err := http.Post(srv.URL+"/events", "application/x-ndjson", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestIngestReturns409OnDuplicateID(t *testing.T) {
+	st := store.NewMemory()
+	srv := httptest.NewServer(NewRouter(st))
+	defer srv.Close()
+
+	body := `{"id":"01HDUPEVENT","session_id":"s1","actor":{"type":"human","id":"alice"},"kind":"prompt"}`
+	resp, err := http.Post(srv.URL+"/events", "application/x-ndjson", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("first post: %v", err)
+	}
+	resp.Body.Close()
+
+	resp, err = http.Post(srv.URL+"/events", "application/x-ndjson", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("second post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("status = %d, want 409", resp.StatusCode)
+	}
+
+	// Sanity: the store still has exactly one event for the session, and
+	// the head-cache wasn't advanced past the failed insert.
+	events, err := st.ListBySession(context.Background(), "s1", 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(events) != 1 {
+		t.Errorf("stored %d events, want 1", len(events))
+	}
+}
+

@@ -6,8 +6,11 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const pgUniqueViolation = "23505"
 
 type Postgres struct {
 	pool *pgxpool.Pool
@@ -44,6 +47,10 @@ func (p *Postgres) AppendEvent(ctx context.Context, e *Event) error {
 		e.Kind, e.Payload, emptyIfNil(e.Parents), emptyIfNil(e.Refs),
 		e.Hash, nullable(e.PrevHash), e.Sig,
 	)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+		return ErrDuplicate
+	}
 	return err
 }
 
@@ -91,7 +98,9 @@ func (p *Postgres) ListBySession(ctx context.Context, sessionID string, limit in
 }
 
 func (p *Postgres) HeadHash(ctx context.Context, sessionID string) (string, error) {
-	const q = `SELECT hash FROM events WHERE session_id = $1 ORDER BY ts DESC LIMIT 1`
+	// Tie-break on id (ULIDs are monotonic within ms) so same-timestamp
+	// events resolve to a deterministic head.
+	const q = `SELECT hash FROM events WHERE session_id = $1 ORDER BY ts DESC, id DESC LIMIT 1`
 	var h string
 	err := p.pool.QueryRow(ctx, q, sessionID).Scan(&h)
 	if errors.Is(err, pgx.ErrNoRows) {

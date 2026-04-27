@@ -4,6 +4,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -128,6 +129,31 @@ func TestPostgresAcceptsNilParentsAndRefs(t *testing.T) {
 	}
 	if len(got.Parents) != 0 || len(got.Refs) != 0 {
 		t.Errorf("expected empty slices, got Parents=%v Refs=%v", got.Parents, got.Refs)
+	}
+}
+
+// TestPostgresRejectsDuplicateID ensures Memory and Postgres agree on
+// duplicate-ID semantics so ingest can rely on a single sentinel.
+func TestPostgresRejectsDuplicateID(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := openPostgresWithSchema(ctx, t)
+	defer cleanup()
+
+	e := &Event{
+		ID:        "01HDUPETEST",
+		TS:        time.Now().UTC(),
+		SessionID: "s-dup",
+		ActorType: "human",
+		ActorID:   "alice",
+		Kind:      "prompt",
+		Hash:      "h1",
+	}
+	if err := st.AppendEvent(ctx, e); err != nil {
+		t.Fatalf("first append: %v", err)
+	}
+	err := st.AppendEvent(ctx, e)
+	if !errors.Is(err, ErrDuplicate) {
+		t.Errorf("second append err = %v, want ErrDuplicate", err)
 	}
 }
 
