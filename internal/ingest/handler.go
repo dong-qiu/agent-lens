@@ -1,6 +1,10 @@
 // Package ingest accepts NDJSON event streams over HTTP and persists them
 // via store.Store. Each line in the request body is one JSON event.
 //
+// The package also exposes a programmatic Append entry point so other
+// in-process producers (webhook receivers, background workers) can enter
+// the same hash-chain pipeline without re-marshaling through the HTTP path.
+//
 // Concurrency model: a single handler-wide mutex serializes the
 // "load head → compute hash → append → update cache" sequence so
 // concurrent appends to the same session never fork the chain. The
@@ -49,49 +53,44 @@ var validKinds = map[string]struct{}{
 	"decision":    {},
 }
 
-// RegisterRoutes wires the ingest endpoints onto r. It is the primary
-// entry point used by the main server. NewRouter wraps it for tests and
-// standalone embedding.
-func RegisterRoutes(r chi.Router, st store.Store) {
-	h := &handler{st: st, heads: map[string]string{}}
-	r.Post("/events", h.ingest)
-}
-
-func NewRouter(st store.Store) http.Handler {
-	r := chi.NewRouter()
-	RegisterRoutes(r, st)
-	return r
-}
-
-type handler struct {
+// Handler owns the per-session head-hash cache and is the single writer
+// into the store. Construct one per process and share it between every
+// ingest path (HTTP NDJSON, webhook, programmatic) so the cache stays
+// authoritative.
+type Handler struct {
 	st    store.Store
 	mu    sync.Mutex
-	heads map[string]string // session_id -> last appended hash; cache backed by store.HeadHash
+	heads map[string]string
 }
 
-// wireEvent is the JSON shape accepted on the wire. It mirrors
+func NewHandler(st store.Store) *Handler {
+	return &Handler{st: st, heads: map[string]string{}}
+}
+
+// WireEvent is the JSON shape accepted on the wire. It mirrors
 // proto/event.proto but uses json.RawMessage for payload so we don't
 // re-marshal user content before hashing.
-type wireEvent struct {
+type WireEvent struct {
 	ID        string          `json:"id,omitempty"`
 	TS        time.Time       `json:"ts"`
 	SessionID string          `json:"session_id"`
 	TurnID    string          `json:"turn_id,omitempty"`
-	Actor     wireActor       `json:"actor"`
+	Actor     WireActor       `json:"actor"`
 	Kind      string          `json:"kind"`
 	Payload   json.RawMessage `json:"payload,omitempty"`
 	Parents   []string        `json:"parents,omitempty"`
 	Refs      []string        `json:"refs,omitempty"`
 }
 
-type wireActor struct {
+type WireActor struct {
 	Type  string `json:"type"`
 	ID    string `json:"id"`
 	Model string `json:"model,omitempty"`
 }
 
-func (h *handler) ingest(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+// IngestNDJSON is the chi-compatible HTTP handler for POST /v1/events.
+func (h *Handler) IngestNDJSON(w http.ResponseWriter, r *http.Request) {
+	defer func() { _ = r.Body.Close() }()
 	scanner := bufio.NewScanner(r.Body)
 	scanner.Buffer(make([]byte, 1<<20), 8<<20) // 8 MiB max line
 
@@ -101,12 +100,12 @@ func (h *handler) ingest(w http.ResponseWriter, r *http.Request) {
 		if len(line) == 0 {
 			continue
 		}
-		var ev wireEvent
+		var ev WireEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
 			http.Error(w, "bad ndjson line: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := h.appendOne(r.Context(), &ev); err != nil {
+		if err := h.Append(r.Context(), &ev); err != nil {
 			h.writeAppendError(w, err)
 			return
 		}
@@ -121,11 +120,11 @@ func (h *handler) ingest(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"accepted": accepted})
 }
 
-// appendOne validates an event, computes its hash chain entry, persists
+// Append validates an event, computes its hash chain entry, persists
 // it, and advances the in-memory head cache. The lock spans only the
 // load-prev → compute → append → cache update sequence; canonical
 // marshaling happens before the lock since it does not depend on prev.
-func (h *handler) appendOne(ctx context.Context, in *wireEvent) error {
+func (h *Handler) Append(ctx context.Context, in *WireEvent) error {
 	if err := validateWireEvent(in); err != nil {
 		return err
 	}
@@ -177,7 +176,7 @@ func (h *handler) appendOne(ctx context.Context, in *wireEvent) error {
 	return nil
 }
 
-func validateWireEvent(in *wireEvent) error {
+func validateWireEvent(in *WireEvent) error {
 	if in.SessionID == "" || in.Kind == "" || in.Actor.Type == "" {
 		return errMissingField
 	}
@@ -187,7 +186,7 @@ func validateWireEvent(in *wireEvent) error {
 	return nil
 }
 
-func (h *handler) writeAppendError(w http.ResponseWriter, err error) {
+func (h *Handler) writeAppendError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errMissingField), errors.Is(err, errInvalidKind):
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -197,4 +196,19 @@ func (h *handler) writeAppendError(w http.ResponseWriter, err error) {
 		slog.Error("ingest append", "err", err)
 		http.Error(w, "store error", http.StatusInternalServerError)
 	}
+}
+
+// RegisterRoutes wires the ingest endpoints onto r. Used by
+// `internal/ingest`'s own tests via NewRouter; production callers
+// (cmd/agent-lens) construct a Handler explicitly so they can share
+// it with other producers.
+func RegisterRoutes(r chi.Router, st store.Store) {
+	h := NewHandler(st)
+	r.Post("/events", h.IngestNDJSON)
+}
+
+func NewRouter(st store.Store) http.Handler {
+	r := chi.NewRouter()
+	RegisterRoutes(r, st)
+	return r
 }

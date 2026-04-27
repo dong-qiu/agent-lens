@@ -71,6 +71,7 @@ make web-build         # TS 类型检查 + Vite 打包
 - `AGENT_LENS_PG_DSN`（默认本地 compose 配置）
 - `AGENT_LENS_TOKEN`：bearer token；空则 `/v1` 不鉴权（dev 默认）。配置后 hook 与浏览器都需带 `Authorization: Bearer <token>`
 - `AGENT_LENS_PLAYGROUND`：设为 `true` 才挂载 `/v1/playground`（默认 off，避免生产暴露 introspection）
+- `AGENT_LENS_GH_WEBHOOK_SECRET`：GitHub webhook 共享密钥；空则 `/webhooks/github` 不挂载。设置后 server 用 HMAC-SHA256 校验 `X-Hub-Signature-256`
 
 **Hook (`agent-lens-hook`)**
 - `AGENT_LENS_URL`（默认 `http://localhost:8787`）
@@ -78,6 +79,19 @@ make web-build         # TS 类型检查 + Vite 打包
 - `AGENT_LENS_CURSOR_DIR`（默认 `~/.agent-lens/cursors`，存 transcript 增量读 cursor）
 
 Stop hook 会读 `transcript_path` 提取 `thinking` / `text` content blocks（仅当本轮启用 extended thinking 时有 thinking）。HTTP 失败时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink。
+
+## 接入 GitHub（M2-A：PR 事件）
+
+1. 在 server 端设环境变量 `AGENT_LENS_GH_WEBHOOK_SECRET=<random>`，然后启动 / 重启 `agent-lens`
+2. 在被观测仓库的 GitHub 设置 → Webhooks → Add webhook：
+   - Payload URL：`https://<your-server>/webhooks/github`
+   - Content type：`application/json`
+   - Secret：与 `AGENT_LENS_GH_WEBHOOK_SECRET` 相同
+   - 选 "Let me select individual events" → 勾 `Pull requests`
+3. PR 事件（opened / synchronize / closed / reopened / etc）会作为 `kind=pr` 事件流入 session `github-pr:<owner>/<repo>#<number>`，UI 中输入这个 session id 即可查看 PR 时间线
+4. PR head commit SHA 写入 `refs[git:<sha>]`，等 M2-B linking worker 上线后会自动与本地 commit hook 上报的 COMMIT 事件串联
+
+`pull_request_review` 与 `push` 事件留给 M2-D。GitHub Actions build 事件留给 M2-C。
 
 ## 模块名
 
