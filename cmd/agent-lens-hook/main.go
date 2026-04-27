@@ -49,5 +49,5 @@ func main() {
 // runClaude is implemented in claude.go.
 // runGitPostCommit is implemented in git.go.
 // runVerify is implemented in verify.go.
-
-func runExport(_ []string) { fmt.Fprintln(os.Stderr, "TODO: export attestation"); os.Exit(1) }
+// runKeygen is implemented in keygen.go.
+// runExport is implemented in export.go.
