@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 )
 
 const verifyUsage = `agent-lens-hook verify — walk a session's hash chain and verify
@@ -35,6 +36,7 @@ func runVerify(args []string) {
 		urlFlag   = fs.String("url", "", "Agent Lens server URL (defaults to AGENT_LENS_URL or http://localhost:8787)")
 		tokenFlag = fs.String("token", "", "bearer token (defaults to AGENT_LENS_TOKEN)")
 		limit     = fs.Int("limit", 0, "maximum events to fetch (0 = all)")
+		timeout   = fs.Duration("timeout", 30*time.Second, "HTTP request timeout")
 		quiet     = fs.Bool("quiet", false, "only print FAIL or summary, not per-event progress")
 	)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, verifyUsage) }
@@ -49,7 +51,7 @@ func runVerify(args []string) {
 	url := chooseURL(*urlFlag)
 	token := chooseToken(*tokenFlag)
 
-	events, err := fetchSession(url, token, *sessionID, *limit)
+	events, err := fetchSession(url, token, *sessionID, *limit, *timeout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fetch: %v\n", err)
 		os.Exit(2)
@@ -103,7 +105,18 @@ const verifyQuery = `query Verify($sessionId: String!, $limit: Int) {
   }
 }`
 
-func fetchSession(url, token, sessionID string, limit int) ([]verifyEvent, error) {
+// fetchSession queries the server for sessionID's event chain. Server
+// is contracted to return events in append order (ListBySession's
+// `ORDER BY ts ASC, id ASC`); the chain walk in runVerify implicitly
+// validates that ordering — events out of order would surface as a
+// prev_hash mismatch — so a separate sort here would only mask
+// genuine integrity problems.
+func fetchSession(url, token, sessionID string, limit int, timeout time.Duration) ([]verifyEvent, error) {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
+
 	body, err := json.Marshal(map[string]any{
 		"query": verifyQuery,
 		"variables": map[string]any{
@@ -122,7 +135,7 @@ func fetchSession(url, token, sessionID string, limit int) ([]verifyEvent, error
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
