@@ -545,8 +545,41 @@ func TestMapWorkflowRun(t *testing.T) {
 	if ev.Actor.Type != "system" {
 		t.Errorf("actor.type = %q, want system", ev.Actor.Type)
 	}
+	if ev.Actor.ID != "CI" {
+		t.Errorf("actor.id = %q, want workflow name CI (not the sender login)", ev.Actor.ID)
+	}
 	if len(ev.Refs) != 1 || ev.Refs[0] != "git:deadbeefcafe1234567890abcdef0123456789ab" {
 		t.Errorf("refs = %+v", ev.Refs)
+	}
+}
+
+func TestMapWorkflowRunRejectsMalformed(t *testing.T) {
+	if _, err := mapWorkflowRun([]byte(`not json`), "delivery-x"); err == nil {
+		t.Error("malformed json accepted")
+	}
+	if _, err := mapWorkflowRun([]byte(`{"action":"completed"}`), "delivery-x"); err == nil {
+		t.Error("missing workflow_run accepted")
+	}
+	if _, err := mapWorkflowRun([]byte(`{"workflow_run":{"id":1}}`), "delivery-x"); err == nil {
+		t.Error("missing repository accepted")
+	}
+}
+
+func TestMapWorkflowRunFallsBackWhenWorkflowNameAbsent(t *testing.T) {
+	body := `{
+	  "action": "completed",
+	  "workflow_run": {
+	    "id": 1,
+	    "head_sha": "deadbeefcafe1234567890abcdef0123456789ab"
+	  },
+	  "repository": {"full_name": "acme/widget"}
+	}`
+	ev, err := mapWorkflowRun([]byte(body), "delivery-x")
+	if err != nil {
+		t.Fatalf("map: %v", err)
+	}
+	if ev.Actor.ID != "github-actions" {
+		t.Errorf("actor.id = %q, want github-actions fallback", ev.Actor.ID)
 	}
 }
 

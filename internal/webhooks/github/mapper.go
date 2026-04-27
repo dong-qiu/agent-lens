@@ -231,14 +231,12 @@ func isZeroSHA(s string) bool {
 type workflowRunPayload struct {
 	WorkflowRun struct {
 		ID      int64  `json:"id"`
+		Name    string `json:"name"`
 		HeadSHA string `json:"head_sha"`
 	} `json:"workflow_run"`
 	Repository struct {
 		FullName string `json:"full_name"`
 	} `json:"repository"`
-	Sender struct {
-		Login string `json:"login"`
-	} `json:"sender"`
 }
 
 func mapWorkflowRun(raw json.RawMessage, deliveryID string) (*ingest.WireEvent, error) {
@@ -250,7 +248,10 @@ func mapWorkflowRun(raw json.RawMessage, deliveryID string) (*ingest.WireEvent, 
 		return nil, fmt.Errorf("workflow_run missing repository.full_name or workflow_run.id")
 	}
 
-	actorID := p.Sender.Login
+	// Actor for a build is the system that ran it, not whoever pushed.
+	// Use the workflow name (e.g. "CI") so the UI reads
+	// "system · CI · <sha>" rather than "system · alice · <sha>".
+	actorID := p.WorkflowRun.Name
 	if actorID == "" {
 		actorID = "github-actions"
 	}
