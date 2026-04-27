@@ -189,3 +189,44 @@ func TestHandlerLinksDeployToCommitViaSharedRef(t *testing.T) {
 	// Sanity: just ensure both fields decode rather than asserting specific JSON.
 	_ = json.RawMessage(peers[1].Payload)
 }
+
+func TestMapDeployRejectsLongEnvironment(t *testing.T) {
+	long := make([]byte, 65)
+	for i := range long {
+		long[i] = 'a'
+	}
+	body := []byte(`{"environment":"` + string(long) + `","git_sha":"abc"}`)
+	if _, err := mapDeploy(body, ""); err == nil {
+		t.Error("expected error for environment > 64 chars")
+	}
+
+	// At the limit (64) is OK.
+	ok := make([]byte, 64)
+	for i := range ok {
+		ok[i] = 'a'
+	}
+	body2 := []byte(`{"environment":"` + string(ok) + `","git_sha":"abc"}`)
+	if _, err := mapDeploy(body2, ""); err != nil {
+		t.Errorf("64-char env rejected: %v", err)
+	}
+}
+
+func TestMapDeployRejectsLongIdempotencyKey(t *testing.T) {
+	long := make([]byte, 129)
+	for i := range long {
+		long[i] = 'k'
+	}
+	body := []byte(`{"environment":"prod","git_sha":"abc"}`)
+	if _, err := mapDeploy(body, string(long)); err == nil {
+		t.Error("expected error for Idempotency-Key > 128 chars")
+	}
+
+	// At the limit (128) is OK.
+	ok := make([]byte, 128)
+	for i := range ok {
+		ok[i] = 'k'
+	}
+	if _, err := mapDeploy(body, string(ok)); err != nil {
+		t.Errorf("128-char key rejected: %v", err)
+	}
+}

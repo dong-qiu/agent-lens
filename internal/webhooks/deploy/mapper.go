@@ -27,6 +27,16 @@ type payload struct {
 	Namespace   string    `json:"namespace"`
 }
 
+// maxEnvironmentLen caps the environment string so an absurdly long
+// payload can't blow up the session_id (used in URLs, logs, the UI
+// dropdown). Realistic env names are <32 chars; 64 is generous.
+const maxEnvironmentLen = 64
+
+// maxIdempotencyKeyLen caps the Idempotency-Key header so an attacker
+// can't smuggle a multi-MB key into the events.id column. ULIDs are
+// 26 chars, UUIDs are 36; 128 is comfortable headroom.
+const maxIdempotencyKeyLen = 128
+
 // mapDeploy parses the body, derives session_id / actor / refs, and
 // returns a wire event ready for ingest. eventID is the optional
 // Idempotency-Key header value; empty falls back to a server-assigned
@@ -38,6 +48,12 @@ func mapDeploy(raw json.RawMessage, eventID string) (*ingest.WireEvent, error) {
 	}
 	if p.Environment == "" {
 		return nil, fmt.Errorf("deploy missing required field: environment")
+	}
+	if len(p.Environment) > maxEnvironmentLen {
+		return nil, fmt.Errorf("deploy environment too long (got %d, max %d)", len(p.Environment), maxEnvironmentLen)
+	}
+	if len(eventID) > maxIdempotencyKeyLen {
+		return nil, fmt.Errorf("Idempotency-Key too long (got %d, max %d)", len(eventID), maxIdempotencyKeyLen)
 	}
 	if p.GitSHA == "" && p.ImageDigest == "" {
 		return nil, fmt.Errorf("deploy must include at least one of git_sha or image_digest")
