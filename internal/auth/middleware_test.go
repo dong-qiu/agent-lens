@@ -52,16 +52,38 @@ func TestRequireTokenCorrectValue(t *testing.T) {
 	}
 }
 
-func TestRequireTokenIgnoresSchemeCase(t *testing.T) {
-	// "Bearer " prefix is stripped literally; tokens that don't start with
-	// the prefix are compared as-is. This documents the contract: clients
-	// must use the canonical "Bearer <token>" form.
+func TestRequireTokenRejectsMissingScheme(t *testing.T) {
+	// RFC 6750 requires the "Bearer" scheme prefix; a bare token must
+	// be rejected so we don't silently accept malformed clients.
 	wrapped := RequireToken("secret")(okHandler())
 	req := httptest.NewRequest("GET", "/", nil)
-	req.Header.Set("Authorization", "secret") // no Bearer prefix
+	req.Header.Set("Authorization", "secret")
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("bare token must be rejected, got %d", rec.Code)
+	}
+}
+
+func TestRequireTokenAcceptsLowercaseScheme(t *testing.T) {
+	// RFC 7235: auth scheme names are case-insensitive.
+	wrapped := RequireToken("secret")(okHandler())
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "bearer secret")
 	rec := httptest.NewRecorder()
 	wrapped.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Errorf("raw token (no Bearer) is currently accepted; got %d", rec.Code)
+		t.Errorf("lowercase scheme must be accepted, got %d", rec.Code)
+	}
+}
+
+func TestRequireTokenRejectsSchemeOnly(t *testing.T) {
+	wrapped := RequireToken("secret")(okHandler())
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer ")
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("scheme without token must be rejected, got %d", rec.Code)
 	}
 }

@@ -122,8 +122,9 @@ func (h *handler) ingest(w http.ResponseWriter, r *http.Request) {
 }
 
 // appendOne validates an event, computes its hash chain entry, persists
-// it, and advances the in-memory head cache — all under a single lock so
-// concurrent writes to the same session can't fork the chain.
+// it, and advances the in-memory head cache. The lock spans only the
+// load-prev → compute → append → cache update sequence; canonical
+// marshaling happens before the lock since it does not depend on prev.
 func (h *handler) appendOne(ctx context.Context, in *wireEvent) error {
 	if err := validateWireEvent(in); err != nil {
 		return err
@@ -133,6 +134,10 @@ func (h *handler) appendOne(ctx context.Context, in *wireEvent) error {
 	}
 	if in.TS.IsZero() {
 		in.TS = time.Now().UTC()
+	}
+	canonical, err := json.Marshal(in)
+	if err != nil {
+		return err
 	}
 
 	h.mu.Lock()
@@ -145,11 +150,6 @@ func (h *handler) appendOne(ctx context.Context, in *wireEvent) error {
 			return fmt.Errorf("load head: %w", err)
 		}
 		prev = loaded
-	}
-
-	canonical, err := json.Marshal(in)
-	if err != nil {
-		return err
 	}
 	hash := hashchain.Compute(prev, canonical)
 

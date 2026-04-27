@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/dongqiu/agent-lens/internal/store"
@@ -161,6 +163,67 @@ func TestIngestRejectsInvalidKind(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// TestIngestConcurrentWritesPreserveChain hammers the same session from
+// many goroutines simultaneously. The handler's per-handler mutex must
+// keep the load → compute → append → cache update sequence atomic so
+// no two events fork the chain (and no event's prev_hash is "" once
+// the session has any prior event).
+func TestIngestConcurrentWritesPreserveChain(t *testing.T) {
+	st := store.NewMemory()
+	srv := httptest.NewServer(NewRouter(st))
+	defer srv.Close()
+
+	const N = 50
+	var wg sync.WaitGroup
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func(i int) {
+			defer wg.Done()
+			body := fmt.Sprintf(
+				`{"session_id":"sc","actor":{"type":"human","id":"alice"},"kind":"prompt","payload":{"i":%d}}`,
+				i,
+			)
+			resp, err := http.Post(srv.URL+"/events", "application/x-ndjson", strings.NewReader(body))
+			if err != nil {
+				t.Errorf("post[%d]: %v", i, err)
+				return
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("post[%d] status = %d", i, resp.StatusCode)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	events, err := st.ListBySession(context.Background(), "sc", 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(events) != N {
+		t.Fatalf("stored %d events, want %d", len(events), N)
+	}
+
+	// Every event after the first must reference the previous one's
+	// hash; no PrevHash should be "" except for index 0.
+	if events[0].PrevHash != "" {
+		t.Errorf("events[0].prev_hash = %q, want empty", events[0].PrevHash)
+	}
+	seen := make(map[string]int, N)
+	for i, e := range events {
+		if e.Hash == "" {
+			t.Errorf("events[%d].hash empty", i)
+		}
+		if prev, dup := seen[e.Hash]; dup {
+			t.Errorf("hash collision: events[%d] and events[%d] both have %s", prev, i, e.Hash)
+		}
+		seen[e.Hash] = i
+		if i > 0 && e.PrevHash != events[i-1].Hash {
+			t.Errorf("chain forked at index %d: prev=%q want %q", i, e.PrevHash, events[i-1].Hash)
+		}
 	}
 }
 

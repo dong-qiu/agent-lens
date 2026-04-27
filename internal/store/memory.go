@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 // Memory is an in-memory Store used by tests and ephemeral workloads.
@@ -59,12 +60,25 @@ func (m *Memory) ListBySession(_ context.Context, sessionID string, limit int) (
 	return out, nil
 }
 
+// HeadHash returns the hash of the latest event for sessionID, where
+// "latest" matches Postgres's `ORDER BY ts DESC, id DESC LIMIT 1`:
+// max ts wins, ULID lexical max breaks ties. This keeps the two impls
+// in lockstep when clients send out-of-order timestamps.
 func (m *Memory) HeadHash(_ context.Context, sessionID string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var head string
+	var (
+		maxTS time.Time
+		maxID string
+		head  string
+	)
 	for _, e := range m.events {
-		if e.SessionID == sessionID {
+		if e.SessionID != sessionID {
+			continue
+		}
+		if e.TS.After(maxTS) || (e.TS.Equal(maxTS) && e.ID > maxID) {
+			maxTS = e.TS
+			maxID = e.ID
 			head = e.Hash
 		}
 	}
