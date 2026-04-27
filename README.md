@@ -80,6 +80,16 @@ make web-build         # TS 类型检查 + Vite 打包
 
 Stop hook 会读 `transcript_path` 提取 `thinking` / `text` content blocks（仅当本轮启用 extended thinking 时有 thinking）。HTTP 失败时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink。
 
+## 校验哈希链
+
+```bash
+agent-lens-hook verify --session <session-id>
+# OK · 6 events · head 7f53e1ebb9779555
+# 或：FAIL at index 3 (id=01HXX...): prev_hash="...", expected "..."
+```
+
+v1 仅校验 `prev_hash → hash` 链路完整性，**不**重新从内容推导每条事件的 hash——后者需要 server 端重序列化逻辑（计划在后续 PR 加 server-side `verifyChain` GraphQL field）。当前足以发现"丢一条事件"或"链条被截断"的篡改，但敌手如能直接写库可伪造一条自洽的链。
+
 ## 接入 GitHub（M2-A：PR 事件）
 
 1. 在 server 端设环境变量 `AGENT_LENS_GH_WEBHOOK_SECRET=<random>`，然后启动 / 重启 `agent-lens`
