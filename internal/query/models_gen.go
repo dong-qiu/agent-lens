@@ -115,6 +115,7 @@ const (
 	EventKindDeploy     EventKind = "DEPLOY"
 	EventKindReview     EventKind = "REVIEW"
 	EventKindDecision   EventKind = "DECISION"
+	EventKindPush       EventKind = "PUSH"
 )
 
 var AllEventKind = []EventKind{
@@ -130,11 +131,12 @@ var AllEventKind = []EventKind{
 	EventKindDeploy,
 	EventKindReview,
 	EventKindDecision,
+	EventKindPush,
 }
 
 func (e EventKind) IsValid() bool {
 	switch e {
-	case EventKindPrompt, EventKindThought, EventKindToolCall, EventKindToolResult, EventKindCodeChange, EventKindCommit, EventKindPr, EventKindTestRun, EventKindBuild, EventKindDeploy, EventKindReview, EventKindDecision:
+	case EventKindPrompt, EventKindThought, EventKindToolCall, EventKindToolResult, EventKindCodeChange, EventKindCommit, EventKindPr, EventKindTestRun, EventKindBuild, EventKindDeploy, EventKindReview, EventKindDecision, EventKindPush:
 		return true
 	}
 	return false

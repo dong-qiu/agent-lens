@@ -12,7 +12,8 @@ export type EventKind =
   | "BUILD"
   | "DEPLOY"
   | "REVIEW"
-  | "DECISION";
+  | "DECISION"
+  | "PUSH";
 
 export type Actor = {
   type: ActorType;

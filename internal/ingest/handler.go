@@ -51,6 +51,7 @@ var validKinds = map[string]struct{}{
 	"deploy":      {},
 	"review":      {},
 	"decision":    {},
+	"push":        {},
 }
 
 // Handler owns the per-session head-hash cache and is the single writer

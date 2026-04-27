@@ -91,6 +91,7 @@ const (
 	EventKind_EVENT_KIND_DEPLOY      EventKind = 10
 	EventKind_EVENT_KIND_REVIEW      EventKind = 11
 	EventKind_EVENT_KIND_DECISION    EventKind = 12
+	EventKind_EVENT_KIND_PUSH        EventKind = 13
 )
 
 // Enum value maps for EventKind.
@@ -109,6 +110,7 @@ var (
 		10: "EVENT_KIND_DEPLOY",
 		11: "EVENT_KIND_REVIEW",
 		12: "EVENT_KIND_DECISION",
+		13: "EVENT_KIND_PUSH",
 	}
 	EventKind_value = map[string]int32{
 		"EVENT_KIND_UNSPECIFIED": 0,
@@ -124,6 +126,7 @@ var (
 		"EVENT_KIND_DEPLOY":      10,
 		"EVENT_KIND_REVIEW":      11,
 		"EVENT_KIND_DECISION":    12,
+		"EVENT_KIND_PUSH":        13,
 	}
 )
 
@@ -376,7 +379,7 @@ const file_event_proto_rawDesc = "" +
 	"\x16ACTOR_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10ACTOR_TYPE_HUMAN\x10\x01\x12\x14\n" +
 	"\x10ACTOR_TYPE_AGENT\x10\x02\x12\x15\n" +
-	"\x11ACTOR_TYPE_SYSTEM\x10\x03*\xc8\x02\n" +
+	"\x11ACTOR_TYPE_SYSTEM\x10\x03*\xdd\x02\n" +
 	"\tEventKind\x12\x1a\n" +
 	"\x16EVENT_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11EVENT_KIND_PROMPT\x10\x01\x12\x16\n" +
@@ -391,7 +394,8 @@ const file_event_proto_rawDesc = "" +
 	"\x11EVENT_KIND_DEPLOY\x10\n" +
 	"\x12\x15\n" +
 	"\x11EVENT_KIND_REVIEW\x10\v\x12\x17\n" +
-	"\x13EVENT_KIND_DECISION\x10\fB.Z,github.com/dongqiu/agent-lens/internal/pb;pbb\x06proto3"
+	"\x13EVENT_KIND_DECISION\x10\f\x12\x13\n" +
+	"\x0fEVENT_KIND_PUSH\x10\rB.Z,github.com/dongqiu/agent-lens/internal/pb;pbb\x06proto3"
 
 var (
 	file_event_proto_rawDescOnce sync.Once

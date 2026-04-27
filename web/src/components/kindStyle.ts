@@ -93,6 +93,13 @@ export const kindStyles: Record<EventKind, KindStyle> = {
     icon: "·",
     label: "decision",
   },
+  PUSH: {
+    container: "border-cyan-300 bg-cyan-50",
+    badge: "bg-cyan-100 text-cyan-900",
+    dot: "bg-cyan-500 ring-cyan-200",
+    icon: "↥",
+    label: "push",
+  },
 };
 
 export const fallbackStyle: KindStyle = {
