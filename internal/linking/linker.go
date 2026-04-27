@@ -13,6 +13,7 @@ package linking
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/dongqiu/agent-lens/internal/ingest"
@@ -80,13 +81,20 @@ func (l *Linker) Run(ctx context.Context) {
 	}
 }
 
-// process is exported for tests via processOnce; production callers
-// always go through Run.
+// process is exported for tests via ProcessOnce; production callers
+// always go through Run. Errors on individual peers don't abort the
+// rest — a transient AppendLink failure on one peer should not strand
+// every other link the event would have produced. The first error is
+// returned (logged by the caller) so debugging still has a signal.
 func (l *Linker) process(ctx context.Context, j job) error {
+	var firstErr error
 	for _, ref := range j.refs {
 		peers, err := l.st.EventsByRef(ctx, ref)
 		if err != nil {
-			return err
+			if firstErr == nil {
+				firstErr = fmt.Errorf("EventsByRef(%q): %w", ref, err)
+			}
+			continue
 		}
 		for _, peer := range peers {
 			if peer.ID == j.eventID {
@@ -100,11 +108,14 @@ func (l *Linker) process(ctx context.Context, j job) error {
 				InferredBy: "shared_ref:" + ref,
 			}
 			if err := l.st.AppendLink(ctx, link); err != nil && !errors.Is(err, store.ErrDuplicate) {
-				return err
+				if firstErr == nil {
+					firstErr = fmt.Errorf("AppendLink(%s→%s): %w", peer.ID, j.eventID, err)
+				}
+				// keep going; other peers / refs may still succeed.
 			}
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // ProcessOnce is a test-only synchronous entry point that processes a

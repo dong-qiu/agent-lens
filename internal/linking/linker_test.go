@@ -183,8 +183,48 @@ func TestProcessOncePropagatesStoreError(t *testing.T) {
 	}
 }
 
+// TestProcessOnceBestEffort verifies that one failing AppendLink does
+// NOT prevent other peers in the same job from being linked.
+func TestProcessOnceBestEffort(t *testing.T) {
+	st := &flakyAppendStore{Memory: store.NewMemory()}
+	ctx := context.Background()
+
+	// Three peers share the ref. The flaky store fails AppendLink for
+	// the first peer ("p1") and succeeds for the rest.
+	for _, id := range []string{"p1", "p2", "p3"} {
+		appendEvent(t, st.Memory, id, []string{"git:r"})
+	}
+	st.failFor = "p1"
+
+	l := New(st, 0)
+	err := l.ProcessOnce(ctx, &ingest.WireEvent{ID: "newcomer", Refs: []string{"git:r"}})
+	if err == nil {
+		t.Error("expected non-nil first error to be reported")
+	}
+
+	// Even with p1's link failing, p2 and p3 should still be linked.
+	links, _ := st.LinksForEvent(ctx, "newcomer")
+	if len(links) != 2 {
+		t.Errorf("got %d links, want 2 (p2 and p3 succeeded; p1 failed)", len(links))
+	}
+}
+
 type failingStore struct{ store.Store }
 
 func (failingStore) EventsByRef(_ context.Context, _ string) ([]*store.Event, error) {
 	return nil, errors.New("boom")
+}
+
+// flakyAppendStore wraps Memory and fails AppendLink whenever the link's
+// FromEvent equals failFor. EventsByRef and other methods pass through.
+type flakyAppendStore struct {
+	*store.Memory
+	failFor string
+}
+
+func (f *flakyAppendStore) AppendLink(ctx context.Context, l *store.Link) error {
+	if l.FromEvent == f.failFor {
+		return errors.New("flaky: synthetic AppendLink failure")
+	}
+	return f.Memory.AppendLink(ctx, l)
 }

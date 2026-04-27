@@ -74,8 +74,14 @@ func NewHandler(st store.Store) *Handler {
 
 // AfterAppend registers a hook called after every successful Append.
 // The hook runs outside the handler's lock so it can do its own I/O
-// without blocking other ingest paths. Set once during wiring; the
-// field is not protected for concurrent assignment.
+// without blocking other ingest paths.
+//
+// Concurrency contract: must be called during process startup, before
+// any goroutine that calls Append (HTTP server, webhook, etc.) is
+// started. The field is not protected for concurrent assignment;
+// happens-before is established only via the goroutine spawn that
+// later reads it. Multiple observers should be combined into a single
+// callback by the caller.
 func (h *Handler) AfterAppend(fn func(context.Context, *WireEvent)) {
 	h.after = fn
 }
