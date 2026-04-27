@@ -372,3 +372,190 @@ func TestExportCodeProvenanceClientSortsByTS(t *testing.T) {
 		t.Errorf("ended_at = %q, want latest 10:00:30", pred.Metadata.EndedAt)
 	}
 }
+
+func TestExportSLSABuildEndToEnd(t *testing.T) {
+	st := store.NewMemory()
+	r := chi.NewRouter()
+	r.Route("/v1", func(sub chi.Router) {
+		ingest.RegisterRoutes(sub, st)
+		query.RegisterRoutes(sub, st)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	// Two BUILD events on the same per-run session: one workflow_run
+	// webhook (lifecycle metadata) and one composite-action (artifact
+	// hashes, the SLSA subjects).
+	body := strings.Join([]string{
+		`{"session_id":"github-build:acme/widget/123","actor":{"type":"system","id":"CI"},"kind":"build","payload":{"workflow_run":{"id":123,"name":"CI","status":"completed","conclusion":"success","head_sha":"deadbeefcafe","head_branch":"main","run_started_at":"2026-04-27T10:00:00Z","updated_at":"2026-04-27T10:05:00Z"}}}`,
+		`{"session_id":"github-build:acme/widget/123","actor":{"type":"system","id":"CI"},"kind":"build","payload":{"source":"composite-action","status":"success","workflow":"CI","run_id":"123","run_number":"42","run_attempt":"1","ref":"refs/heads/main","sha":"deadbeefcafe","artifacts":[{"path":"dist/widget.tar.gz","sha256":"abc111","bytes":12345},{"path":"dist/widget.bin","sha256":"def222","bytes":67890}]}}`,
+	}, "\n")
+	resp, err := http.Post(srv.URL+"/v1/events", "application/x-ndjson", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519")
+	priv, pub, _ := attest.GenerateKey()
+	_ = attest.SaveKeyPair(keyPath, priv)
+
+	var buf bytes.Buffer
+	args := []string{
+		"--session", "github-build:acme/widget/123",
+		"--repo", "https://github.com/acme/widget",
+		"--key", keyPath,
+		"--url", srv.URL,
+	}
+	if err := exportSLSABuild(args, &buf); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+
+	var env attest.Envelope
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &env); err != nil {
+		t.Fatalf("parse envelope: %v", err)
+	}
+	payload, _, err := attest.Verify(pub, &env)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+
+	var stmt attest.Statement
+	_ = json.Unmarshal(payload, &stmt)
+	if stmt.PredicateType != attest.SLSAProvenancePredicate {
+		t.Errorf("predicateType = %q, want %q", stmt.PredicateType, attest.SLSAProvenancePredicate)
+	}
+	if len(stmt.Subject) != 2 {
+		t.Fatalf("subjects = %d, want 2", len(stmt.Subject))
+	}
+	if stmt.Subject[0].Name != "dist/widget.tar.gz" || stmt.Subject[0].Digest["sha256"] != "abc111" {
+		t.Errorf("subject[0] = %+v", stmt.Subject[0])
+	}
+
+	var pred attest.SLSAProvenance
+	_ = json.Unmarshal(stmt.Predicate, &pred)
+	if pred.BuildDefinition.BuildType != attest.SLSABuildType {
+		t.Errorf("buildType = %q", pred.BuildDefinition.BuildType)
+	}
+	if pred.BuildDefinition.ExternalParameters["workflow"] != "CI" {
+		t.Errorf("externalParameters.workflow = %v", pred.BuildDefinition.ExternalParameters["workflow"])
+	}
+	if pred.BuildDefinition.InternalParameters["run_id"] != "123" {
+		t.Errorf("internalParameters.run_id = %v", pred.BuildDefinition.InternalParameters["run_id"])
+	}
+	if pred.RunDetails.Builder.ID != attest.SLSABuilderID {
+		t.Errorf("builder.id = %q", pred.RunDetails.Builder.ID)
+	}
+	if pred.RunDetails.Metadata.InvocationID != "123" {
+		t.Errorf("metadata.invocationId = %q", pred.RunDetails.Metadata.InvocationID)
+	}
+
+	// resolvedDependencies should have the source commit
+	if len(pred.BuildDefinition.ResolvedDependencies) != 1 {
+		t.Fatalf("resolvedDependencies = %d, want 1", len(pred.BuildDefinition.ResolvedDependencies))
+	}
+	if pred.BuildDefinition.ResolvedDependencies[0].URI != "git+https://github.com/acme/widget@deadbeefcafe" {
+		t.Errorf("dep URI = %q", pred.BuildDefinition.ResolvedDependencies[0].URI)
+	}
+}
+
+func TestExportSLSABuildErrorsWithoutCompositeAction(t *testing.T) {
+	st := store.NewMemory()
+	r := chi.NewRouter()
+	r.Route("/v1", func(sub chi.Router) {
+		ingest.RegisterRoutes(sub, st)
+		query.RegisterRoutes(sub, st)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	// Only the workflow_run webhook event — no composite-action,
+	// therefore no artifact subjects available.
+	body := `{"session_id":"github-build:acme/widget/456","actor":{"type":"system","id":"CI"},"kind":"build","payload":{"workflow_run":{"id":456,"name":"CI","status":"completed","conclusion":"success","head_sha":"deadbeef"}}}`
+	resp, err := http.Post(srv.URL+"/v1/events", "application/x-ndjson", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519")
+	priv, _, _ := attest.GenerateKey()
+	_ = attest.SaveKeyPair(keyPath, priv)
+
+	var buf bytes.Buffer
+	args := []string{
+		"--session", "github-build:acme/widget/456",
+		"--key", keyPath,
+		"--url", srv.URL,
+	}
+	err = exportSLSABuild(args, &buf)
+	if err == nil {
+		t.Fatal("expected error when no composite-action event, got nil")
+	}
+	if !strings.Contains(err.Error(), "composite-action") {
+		t.Errorf("error doesn't mention composite-action: %v", err)
+	}
+}
+
+func TestExportSLSABuildRequiresSession(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519")
+	priv, _, _ := attest.GenerateKey()
+	_ = attest.SaveKeyPair(keyPath, priv)
+
+	var buf bytes.Buffer
+	if err := exportSLSABuild([]string{"--key", keyPath}, &buf); err == nil {
+		t.Error("expected error when --session missing")
+	}
+}
+
+func TestBuildSLSAInputsFromEventsCompositeActionPreferred(t *testing.T) {
+	// When both composite-action and workflow_run events are present,
+	// composite-action's flat fields win over webhook's nested fields
+	// (composite values are more authoritative — they came from inside
+	// the build itself).
+	events := []provenanceEvent{
+		{
+			Kind: "BUILD",
+			Payload: map[string]any{
+				"workflow_run": map[string]any{
+					"id":          float64(999),
+					"name":        "OTHER",
+					"head_sha":    "fromwebhook",
+					"head_branch": "fromwebhook",
+				},
+			},
+		},
+		{
+			Kind: "BUILD",
+			Payload: map[string]any{
+				"source":   "composite-action",
+				"workflow": "CI-PREFERRED",
+				"run_id":   "111",
+				"sha":      "frominsidebuild",
+				"ref":      "refs/heads/main",
+				"artifacts": []any{
+					map[string]any{"path": "x", "sha256": "abc"},
+				},
+			},
+		},
+	}
+	in, err := buildSLSAInputsFromEvents(events, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.WorkflowName != "CI-PREFERRED" {
+		t.Errorf("workflow = %q, want CI-PREFERRED (composite action wins)", in.WorkflowName)
+	}
+	if in.RunID != "111" {
+		t.Errorf("run_id = %q, want 111", in.RunID)
+	}
+	if in.CommitSHA != "frominsidebuild" {
+		t.Errorf("sha = %q, want frominsidebuild", in.CommitSHA)
+	}
+	if in.Ref != "refs/heads/main" {
+		t.Errorf("ref = %q", in.Ref)
+	}
+}
