@@ -8,27 +8,20 @@ import (
 	"github.com/dongqiu/agent-lens/internal/ingest"
 )
 
-// pullRequestPayload is the subset of the GitHub `pull_request` webhook
-// payload we read. Unrecognized fields are ignored; the original payload
-// is preserved verbatim in the wire event's payload field so consumers
-// can introspect the full GitHub state.
+// pullRequestPayload is the subset of GitHub's `pull_request` webhook
+// payload that we read to derive session_id / actor / refs. The wire
+// event's payload field receives the FULL webhook body verbatim so
+// consumers can navigate any field GitHub sent (labels, reviewers,
+// draft status, mergeable, etc.) without us pre-curating.
 type pullRequestPayload struct {
-	Action      string `json:"action"`
-	Number      int    `json:"number"`
+	Number      int `json:"number"`
 	PullRequest struct {
-		Title   string `json:"title"`
-		HTMLURL string `json:"html_url"`
-		State   string `json:"state"`
-		User    struct {
+		User struct {
 			Login string `json:"login"`
 		} `json:"user"`
 		Head struct {
 			SHA string `json:"sha"`
-			Ref string `json:"ref"`
 		} `json:"head"`
-		Base struct {
-			Ref string `json:"ref"`
-		} `json:"base"`
 	} `json:"pull_request"`
 	Repository struct {
 		FullName string `json:"full_name"`
@@ -38,12 +31,16 @@ type pullRequestPayload struct {
 	} `json:"sender"`
 }
 
-// mapPullRequest turns a parsed pull_request webhook payload into a
-// wire event. session_id stays stable across the PR lifetime
-// (`github-pr:<owner>/<repo>#<number>`) so all actions on a PR group
-// in the timeline. The head commit SHA is also recorded as a ref so
-// the M2-B linking worker can correlate with COMMIT events.
-func mapPullRequest(raw json.RawMessage) (*ingest.WireEvent, error) {
+// mapPullRequest derives a wire event from a `pull_request` webhook
+// body. deliveryID (from the X-GitHub-Delivery header) is set as the
+// event ID so duplicate deliveries hit ErrDuplicate at the store
+// layer; if empty, the ingest pipeline assigns a ULID.
+//
+// session_id: `github-pr:<owner>/<repo>/<number>`. Slashes are
+// query-string-safe, so the format survives `?session=...` in the
+// Lens UI URL — the previous `#`-separated form was eaten by the
+// browser as a fragment.
+func mapPullRequest(raw json.RawMessage, deliveryID string) (*ingest.WireEvent, error) {
 	var p pullRequestPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("decode pull_request: %w", err)
@@ -57,36 +54,21 @@ func mapPullRequest(raw json.RawMessage) (*ingest.WireEvent, error) {
 		actorID = p.PullRequest.User.Login
 	}
 
-	payload, err := json.Marshal(map[string]any{
-		"action":      p.Action,
-		"number":      p.Number,
-		"title":       p.PullRequest.Title,
-		"url":         p.PullRequest.HTMLURL,
-		"state":       p.PullRequest.State,
-		"head_sha":    p.PullRequest.Head.SHA,
-		"head_branch": p.PullRequest.Head.Ref,
-		"base_branch": p.PullRequest.Base.Ref,
-		"repo":        p.Repository.FullName,
-		"author":      p.PullRequest.User.Login,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("encode payload: %w", err)
-	}
-
 	var refs []string
 	if p.PullRequest.Head.SHA != "" {
 		refs = []string{"git:" + p.PullRequest.Head.SHA}
 	}
 
 	return &ingest.WireEvent{
+		ID:        deliveryID,
 		TS:        time.Now().UTC(),
-		SessionID: fmt.Sprintf("github-pr:%s#%d", p.Repository.FullName, p.Number),
+		SessionID: fmt.Sprintf("github-pr:%s/%d", p.Repository.FullName, p.Number),
 		Actor: ingest.WireActor{
 			Type: "human",
 			ID:   actorID,
 		},
 		Kind:    "pr",
-		Payload: payload,
+		Payload: raw,
 		Refs:    refs,
 	}, nil
 }

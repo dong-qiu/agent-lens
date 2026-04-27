@@ -63,11 +63,17 @@ func main() {
 		query.RegisterRoutes(sub, st)
 	})
 
+	// /webhooks/github is always mounted so operators get an
+	// actionable 503 when the secret is missing (rather than a bare
+	// chi 404 that's indistinguishable from a typo).
 	if secret := os.Getenv("AGENT_LENS_GH_WEBHOOK_SECRET"); secret != "" {
 		r.Post("/webhooks/github", githubwh.NewHandler(secret, ingestH).ServeHTTP)
 		slog.Info("github webhook enabled", "path", "/webhooks/github")
 	} else {
-		slog.Info("AGENT_LENS_GH_WEBHOOK_SECRET unset; /webhooks/github not registered")
+		r.Post("/webhooks/github", func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "webhook receiver disabled (AGENT_LENS_GH_WEBHOOK_SECRET unset)", http.StatusServiceUnavailable)
+		})
+		slog.Info("AGENT_LENS_GH_WEBHOOK_SECRET unset; /webhooks/github returns 503")
 	}
 
 	srv := &http.Server{

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -259,3 +260,77 @@ func TestIngestReturns409OnDuplicateID(t *testing.T) {
 	}
 }
 
+
+// TestAppendDirectChainsAndDedupes exercises the public Handler.Append
+// contract: chained writes preserve the per-session head, validation
+// rejects unknown kinds, and a duplicate ID surfaces ErrDuplicate
+// without advancing the head cache.
+func TestAppendDirectChainsAndDedupes(t *testing.T) {
+	st := store.NewMemory()
+	h := NewHandler(st)
+	ctx := context.Background()
+
+	a := &WireEvent{
+		ID:        "01HAPPENDA",
+		SessionID: "s-direct",
+		Actor:     WireActor{Type: "human", ID: "alice"},
+		Kind:      "prompt",
+	}
+	b := &WireEvent{
+		ID:        "01HAPPENDB",
+		SessionID: "s-direct",
+		Actor:     WireActor{Type: "human", ID: "alice"},
+		Kind:      "prompt",
+	}
+	if err := h.Append(ctx, a); err != nil {
+		t.Fatalf("append a: %v", err)
+	}
+	if err := h.Append(ctx, b); err != nil {
+		t.Fatalf("append b: %v", err)
+	}
+
+	got, err := st.ListBySession(ctx, "s-direct", 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2", len(got))
+	}
+	if got[1].PrevHash != got[0].Hash {
+		t.Errorf("chain broken: got[1].prev = %q, want %q", got[1].PrevHash, got[0].Hash)
+	}
+
+	// Invalid kind rejected by validation.
+	bad := &WireEvent{
+		SessionID: "s-direct",
+		Actor:     WireActor{Type: "human", ID: "alice"},
+		Kind:      "bogus",
+	}
+	if err := h.Append(ctx, bad); !errors.Is(err, errInvalidKind) {
+		t.Errorf("invalid kind err = %v, want errInvalidKind", err)
+	}
+
+	// Duplicate ID returns ErrDuplicate; head cache must not advance
+	// past the failed insert.
+	dup := *a
+	if err := h.Append(ctx, &dup); !errors.Is(err, store.ErrDuplicate) {
+		t.Errorf("duplicate id err = %v, want ErrDuplicate", err)
+	}
+
+	c := &WireEvent{
+		ID:        "01HAPPENDC",
+		SessionID: "s-direct",
+		Actor:     WireActor{Type: "human", ID: "alice"},
+		Kind:      "prompt",
+	}
+	if err := h.Append(ctx, c); err != nil {
+		t.Fatalf("append c: %v", err)
+	}
+	all, _ := st.ListBySession(ctx, "s-direct", 0)
+	if len(all) != 3 {
+		t.Fatalf("got %d events, want 3", len(all))
+	}
+	if all[2].PrevHash != all[1].Hash {
+		t.Errorf("chain forked after failed insert: got[2].prev = %q, want %q", all[2].PrevHash, all[1].Hash)
+	}
+}
