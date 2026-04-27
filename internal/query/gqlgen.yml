@@ -1,0 +1,22 @@
+schema:
+  - schema.graphql
+
+exec:
+  filename: generated.go
+  package: query
+
+model:
+  filename: models_gen.go
+  package: query
+
+resolver:
+  layout: follow-schema
+  dir: .
+  package: query
+  filename_template: "{name}.resolvers.go"
+
+models:
+  Time:
+    model: github.com/99designs/gqlgen/graphql.Time
+  JSON:
+    model: github.com/99designs/gqlgen/graphql.Map
