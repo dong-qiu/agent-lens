@@ -78,6 +78,7 @@ type SLSABuildInputs struct {
 	StartedOn    string
 	FinishedOn   string
 	Conclusion   string // e.g. "success", "failure" — recorded as a byproduct
+	BuilderID    string // optional override; defaults to SLSABuilderID
 }
 
 // BuildSLSAProvenanceStatement assembles a SLSA Build Track v1
@@ -124,6 +125,11 @@ func BuildSLSAProvenanceStatement(in SLSABuildInputs) (*Statement, error) {
 		})
 	}
 
+	builderID := in.BuilderID
+	if builderID == "" {
+		builderID = SLSABuilderID
+	}
+
 	pred := SLSAProvenance{
 		BuildDefinition: SLSABuildDefinition{
 			BuildType:            SLSABuildType,
@@ -132,7 +138,7 @@ func BuildSLSAProvenanceStatement(in SLSABuildInputs) (*Statement, error) {
 			ResolvedDependencies: deps,
 		},
 		RunDetails: SLSARunDetails{
-			Builder: SLSABuilder{ID: SLSABuilderID},
+			Builder: SLSABuilder{ID: builderID},
 			Metadata: SLSARunMetadata{
 				InvocationID: in.RunID,
 				StartedOn:    in.StartedOn,

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -557,5 +558,103 @@ func TestBuildSLSAInputsFromEventsCompositeActionPreferred(t *testing.T) {
 	}
 	if in.Ref != "refs/heads/main" {
 		t.Errorf("ref = %q", in.Ref)
+	}
+}
+
+func TestExportSLSABuildBuilderIDFlag(t *testing.T) {
+	st := store.NewMemory()
+	r := chi.NewRouter()
+	r.Route("/v1", func(sub chi.Router) {
+		ingest.RegisterRoutes(sub, st)
+		query.RegisterRoutes(sub, st)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	body := `{"session_id":"github-build:acme/widget/789","actor":{"type":"system","id":"CI"},"kind":"build","payload":{"source":"composite-action","status":"success","workflow":"CI","run_id":"789","sha":"deadbeef","artifacts":[{"path":"x","sha256":"abc"}]}}`
+	resp, err := http.Post(srv.URL+"/v1/events", "application/x-ndjson", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519")
+	priv, pub, _ := attest.GenerateKey()
+	_ = attest.SaveKeyPair(keyPath, priv)
+
+	var buf bytes.Buffer
+	args := []string{
+		"--session", "github-build:acme/widget/789",
+		"--builder-id", "https://acme.example.com/runner/self-hosted",
+		"--key", keyPath,
+		"--url", srv.URL,
+	}
+	if err := exportSLSABuild(args, &buf); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	var env attest.Envelope
+	_ = json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &env)
+	payload, _, _ := attest.Verify(pub, &env)
+	var stmt attest.Statement
+	_ = json.Unmarshal(payload, &stmt)
+	var pred attest.SLSAProvenance
+	_ = json.Unmarshal(stmt.Predicate, &pred)
+	if pred.RunDetails.Builder.ID != "https://acme.example.com/runner/self-hosted" {
+		t.Errorf("builder.id = %q, want override", pred.RunDetails.Builder.ID)
+	}
+}
+
+func TestExportSLSABuildHandlesLargeRunID(t *testing.T) {
+	// json.Number path: a large numeric run_id from the workflow_run
+	// webhook decodes correctly without precision loss. 13-digit run
+	// IDs are well within float64 mantissa today, but UseNumber is
+	// the forward-compatible idiom — this test pins it.
+	st := store.NewMemory()
+	r := chi.NewRouter()
+	r.Route("/v1", func(sub chi.Router) {
+		ingest.RegisterRoutes(sub, st)
+		query.RegisterRoutes(sub, st)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	const bigID = 9007199254740991 // 2^53 - 1, the largest exact float64 integer
+	body := strings.Join([]string{
+		`{"session_id":"github-build:acme/widget/big","actor":{"type":"system","id":"CI"},"kind":"build","payload":{"workflow_run":{"id":9007199254740991,"name":"CI","head_sha":"deadbeef"}}}`,
+		`{"session_id":"github-build:acme/widget/big","actor":{"type":"system","id":"CI"},"kind":"build","payload":{"source":"composite-action","status":"success","workflow":"CI","sha":"deadbeef","artifacts":[{"path":"x","sha256":"abc"}]}}`,
+	}, "\n")
+	resp, err := http.Post(srv.URL+"/v1/events", "application/x-ndjson", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519")
+	priv, pub, _ := attest.GenerateKey()
+	_ = attest.SaveKeyPair(keyPath, priv)
+
+	var buf bytes.Buffer
+	args := []string{
+		"--session", "github-build:acme/widget/big",
+		"--key", keyPath,
+		"--url", srv.URL,
+	}
+	if err := exportSLSABuild(args, &buf); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	var env attest.Envelope
+	_ = json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &env)
+	payload, _, _ := attest.Verify(pub, &env)
+	var stmt attest.Statement
+	_ = json.Unmarshal(payload, &stmt)
+	var pred attest.SLSAProvenance
+	_ = json.Unmarshal(stmt.Predicate, &pred)
+
+	// composite-action run_id was empty for this test; webhook id should populate.
+	wantID := strconv.FormatInt(int64(bigID), 10)
+	if pred.RunDetails.Metadata.InvocationID != wantID {
+		t.Errorf("invocationId = %q, want %q (%d)", pred.RunDetails.Metadata.InvocationID, wantID, bigID)
 	}
 }

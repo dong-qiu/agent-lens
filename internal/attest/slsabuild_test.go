@@ -143,3 +143,26 @@ func TestSLSAProvenanceJSONStable(t *testing.T) {
 		t.Errorf("round-trip lost predicateType")
 	}
 }
+
+func TestBuildSLSAProvenanceStatementBuilderIDOverride(t *testing.T) {
+	// Default → SLSABuilderID.
+	stmt, _ := BuildSLSAProvenanceStatement(SLSABuildInputs{
+		Subjects: []Subject{{Name: "x", Digest: map[string]string{"sha256": "abc"}}},
+	})
+	var pred SLSAProvenance
+	_ = json.Unmarshal(stmt.Predicate, &pred)
+	if pred.RunDetails.Builder.ID != SLSABuilderID {
+		t.Errorf("default builder.id = %q, want %q", pred.RunDetails.Builder.ID, SLSABuilderID)
+	}
+
+	// Override.
+	stmt2, _ := BuildSLSAProvenanceStatement(SLSABuildInputs{
+		Subjects:  []Subject{{Name: "x", Digest: map[string]string{"sha256": "abc"}}},
+		BuilderID: "https://acme.example.com/runner/self-hosted",
+	})
+	var pred2 SLSAProvenance
+	_ = json.Unmarshal(stmt2.Predicate, &pred2)
+	if pred2.RunDetails.Builder.ID != "https://acme.example.com/runner/self-hosted" {
+		t.Errorf("override builder.id = %q", pred2.RunDetails.Builder.ID)
+	}
+}

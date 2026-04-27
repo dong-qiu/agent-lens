@@ -270,7 +270,13 @@ func fetchProvenanceEvents(url, token, sessionID string, limit int, timeout time
 			Message string `json:"message"`
 		} `json:"errors"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	// UseNumber so payload numbers (e.g. workflow_run.id) decode as
+	// json.Number instead of float64. GitHub run ids are well under
+	// 2^53 today so the float path also works in practice, but
+	// json.Number is the forward-compatible idiom.
+	dec := json.NewDecoder(resp.Body)
+	dec.UseNumber()
+	if err := dec.Decode(&out); err != nil {
 		return nil, err
 	}
 	if len(out.Errors) > 0 {
@@ -353,6 +359,9 @@ Usage:
   --repo     repo URL (e.g. https://github.com/acme/widget); recorded
              as the source resolvedDependency URI. Without --repo the
              dep is digest-only.
+  --builder-id   override builder.id in runDetails (default GitHub-hosted
+             runner URI). Self-hosted runners or GHES installations
+             should pass their own URI here.
   --key      ed25519 private key path
              (default $HOME/.agent-lens/keys/ed25519)
   --out      output file (default stdout)
@@ -370,14 +379,15 @@ func exportSLSABuild(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("export slsa-build", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var (
-		session   = fs.String("session", "", "github-build session id (required)")
-		repoFlag  = fs.String("repo", "", "repo URL recorded as the source resolvedDependency URI")
-		keyPath   = fs.String("key", "", "ed25519 private key path")
-		outPath   = fs.String("out", "", "output file (default stdout)")
-		urlFlag   = fs.String("url", "", "server URL")
-		tokenFlag = fs.String("token", "", "bearer token")
-		limit     = fs.Int("limit", 5000, "max events to fetch")
-		timeout   = fs.Duration("timeout", 30*time.Second, "HTTP timeout")
+		session     = fs.String("session", "", "github-build session id (required)")
+		repoFlag    = fs.String("repo", "", "repo URL recorded as the source resolvedDependency URI")
+		builderID   = fs.String("builder-id", attest.SLSABuilderID, "override builder.id (e.g. self-hosted runner URI)")
+		keyPath     = fs.String("key", "", "ed25519 private key path")
+		outPath     = fs.String("out", "", "output file (default stdout)")
+		urlFlag     = fs.String("url", "", "server URL")
+		tokenFlag   = fs.String("token", "", "bearer token")
+		limit       = fs.Int("limit", 5000, "max events to fetch")
+		timeout     = fs.Duration("timeout", 30*time.Second, "HTTP timeout")
 	)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, slsaBuildUsage) }
 	if err := fs.Parse(args); err != nil {
@@ -418,6 +428,7 @@ func exportSLSABuild(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	in.BuilderID = *builderID
 
 	stmt, err := attest.BuildSLSAProvenanceStatement(in)
 	if err != nil {
@@ -515,8 +526,17 @@ func buildSLSAInputsFromEvents(events []provenanceEvent, repo string) (attest.SL
 			in.WorkflowName, _ = wr["name"].(string)
 		}
 		if in.RunID == "" {
-			if id, ok := wr["id"].(float64); ok {
-				in.RunID = strconv.FormatInt(int64(id), 10)
+			// Accept whichever JSON-decoder type carries the number.
+			// UseNumber gives json.Number; default decoder gives
+			// float64; a webhook payload could even hand us the run
+			// id pre-stringified.
+			switch v := wr["id"].(type) {
+			case json.Number:
+				in.RunID = string(v)
+			case float64:
+				in.RunID = strconv.FormatInt(int64(v), 10)
+			case string:
+				in.RunID = v
 			}
 		}
 		if in.CommitSHA == "" {
