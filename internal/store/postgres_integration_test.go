@@ -6,6 +6,9 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,15 +18,31 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-const migrationPath = "../../migrations/0001_init.up.sql"
+const migrationsDir = "../../migrations"
 
+// loadSchema concatenates every migrations/*.up.sql in lexical order so
+// the integration tests run against the same schema a fresh deployment
+// gets after `make migrate-up`.
 func loadSchema(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile(migrationPath)
+	files, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
 	if err != nil {
-		t.Fatalf("read migration: %v", err)
+		t.Fatalf("glob migrations: %v", err)
 	}
-	return string(b)
+	if len(files) == 0 {
+		t.Fatalf("no migrations found under %s", migrationsDir)
+	}
+	sort.Strings(files)
+	var b strings.Builder
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		b.Write(raw)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 func TestPostgresAppendAndList(t *testing.T) {
@@ -195,5 +214,72 @@ func openPostgresWithSchema(ctx context.Context, t *testing.T) (*Postgres, func(
 	return st, func() {
 		st.Close()
 		_ = pgC.Terminate(ctx)
+	}
+}
+
+// TestPostgresLinkRoundTrip exercises EventsByRef + AppendLink +
+// LinksForEvent end-to-end against the real GIN index added in 0002.
+func TestPostgresLinkRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := openPostgresWithSchema(ctx, t)
+	defer cleanup()
+
+	now := time.Now().UTC()
+	e1 := &Event{
+		ID: "01HLINKA", TS: now, SessionID: "git-r", ActorType: "human",
+		ActorID: "alice", Kind: "commit", Hash: "h1",
+		Refs: []string{"git:abc123"},
+	}
+	e2 := &Event{
+		ID: "01HLINKB", TS: now.Add(time.Second), SessionID: "github-pr:o/r/1",
+		ActorType: "human", ActorID: "alice", Kind: "pr", Hash: "h2",
+		Refs: []string{"git:abc123"},
+	}
+	for _, e := range []*Event{e1, e2} {
+		if err := st.AppendEvent(ctx, e); err != nil {
+			t.Fatalf("append %s: %v", e.ID, err)
+		}
+	}
+
+	peers, err := st.EventsByRef(ctx, "git:abc123")
+	if err != nil {
+		t.Fatalf("EventsByRef: %v", err)
+	}
+	if len(peers) != 2 {
+		t.Errorf("got %d peers, want 2", len(peers))
+	}
+
+	link := &Link{
+		FromEvent: e1.ID, ToEvent: e2.ID, Relation: "references",
+		Confidence: 1.0, InferredBy: "shared_ref:git:abc123",
+	}
+	if err := st.AppendLink(ctx, link); err != nil {
+		t.Fatalf("AppendLink: %v", err)
+	}
+	if err := st.AppendLink(ctx, link); !errors.Is(err, ErrDuplicate) {
+		t.Errorf("duplicate link err = %v, want ErrDuplicate", err)
+	}
+
+	got, err := st.LinksForEvent(ctx, e1.ID)
+	if err != nil {
+		t.Fatalf("LinksForEvent(from): %v", err)
+	}
+	if len(got) != 1 || got[0].ToEvent != e2.ID {
+		t.Errorf("links for e1 = %+v, want one to e2", got)
+	}
+	got2, err := st.LinksForEvent(ctx, e2.ID)
+	if err != nil {
+		t.Fatalf("LinksForEvent(to): %v", err)
+	}
+	if len(got2) != 1 || got2[0].FromEvent != e1.ID {
+		t.Errorf("links for e2 = %+v, want one from e1", got2)
+	}
+
+	none, err := st.EventsByRef(ctx, "git:notfound")
+	if err != nil {
+		t.Fatalf("EventsByRef miss: %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("EventsByRef miss returned %d events", len(none))
 	}
 }

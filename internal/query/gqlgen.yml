@@ -20,3 +20,9 @@ models:
     model: github.com/99designs/gqlgen/graphql.Time
   JSON:
     model: github.com/99designs/gqlgen/graphql.Map
+  Event:
+    fields:
+      # Resolved lazily so a query that doesn't ask for links pays
+      # nothing, and we can DataLoader-batch later.
+      links:
+        resolver: true

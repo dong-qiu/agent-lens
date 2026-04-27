@@ -15,6 +15,7 @@ import (
 
 	"github.com/dongqiu/agent-lens/internal/auth"
 	"github.com/dongqiu/agent-lens/internal/ingest"
+	"github.com/dongqiu/agent-lens/internal/linking"
 	"github.com/dongqiu/agent-lens/internal/query"
 	"github.com/dongqiu/agent-lens/internal/store"
 	githubwh "github.com/dongqiu/agent-lens/internal/webhooks/github"
@@ -56,6 +57,14 @@ func main() {
 	// in-process producers (e.g. webhook receivers) so the head-hash
 	// cache stays authoritative.
 	ingestH := ingest.NewHandler(st)
+
+	// Linking worker observes successful appends and writes shared-ref
+	// links asynchronously so it never blocks ingest.
+	linker := linking.New(st, 1024)
+	ingestH.AfterAppend(func(_ context.Context, ev *ingest.WireEvent) {
+		linker.Notify(ev)
+	})
+	go linker.Run(ctx)
 
 	r.Route("/v1", func(sub chi.Router) {
 		sub.Use(auth.RequireToken(token))

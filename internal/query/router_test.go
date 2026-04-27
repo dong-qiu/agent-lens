@@ -128,3 +128,71 @@ func TestQuerySessionHeadEmpty(t *testing.T) {
 		t.Errorf("head for unknown session = %q, want empty", head)
 	}
 }
+
+// TestEventLinksResolver exercises the new Event.links resolver
+// (M2-B). Two events sharing a `git:<sha>` ref get linked via
+// AppendLink in the store; the GraphQL query for either event
+// returns the corresponding link.
+func TestEventLinksResolver(t *testing.T) {
+	st := store.NewMemory()
+	ctx := context.Background()
+	if err := st.AppendEvent(ctx, &store.Event{
+		ID: "e1", SessionID: "s1", ActorType: "human", ActorID: "alice",
+		Kind: "commit", Hash: "h1", Refs: []string{"git:abc"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendEvent(ctx, &store.Event{
+		ID: "e2", SessionID: "s2", ActorType: "human", ActorID: "alice",
+		Kind: "pr", Hash: "h2", Refs: []string{"git:abc"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendLink(ctx, &store.Link{
+		FromEvent: "e1", ToEvent: "e2", Relation: "references",
+		Confidence: 1.0, InferredBy: "shared_ref:git:abc",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(query.NewRouter(st))
+	defer srv.Close()
+
+	body := `{"query":"{ event(id: \"e2\") { id links { fromEvent toEvent relation inferredBy } } }"}`
+	resp, err := http.Post(srv.URL+"/graphql", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var got struct {
+		Data struct {
+			Event struct {
+				ID    string `json:"id"`
+				Links []struct {
+					FromEvent  string `json:"fromEvent"`
+					ToEvent    string `json:"toEvent"`
+					Relation   string `json:"relation"`
+					InferredBy string `json:"inferredBy"`
+				} `json:"links"`
+			} `json:"event"`
+		} `json:"data"`
+		Errors []map[string]any `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Errors) > 0 {
+		t.Fatalf("graphql errors: %+v", got.Errors)
+	}
+	if len(got.Data.Event.Links) != 1 {
+		t.Fatalf("got %d links, want 1", len(got.Data.Event.Links))
+	}
+	link := got.Data.Event.Links[0]
+	if link.FromEvent != "e1" || link.ToEvent != "e2" || link.Relation != "references" {
+		t.Errorf("link = %+v", link)
+	}
+	if link.InferredBy != "shared_ref:git:abc" {
+		t.Errorf("inferred_by = %q", link.InferredBy)
+	}
+}

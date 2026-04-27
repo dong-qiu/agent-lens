@@ -37,6 +37,7 @@ export const eventsQuery = `
       refs
       hash
       prevHash
+      links { fromEvent toEvent relation inferredBy }
     }
     sessionHead(sessionId: $sessionId)
   }

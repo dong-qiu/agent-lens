@@ -109,6 +109,57 @@ func (p *Postgres) HeadHash(ctx context.Context, sessionID string) (string, erro
 	return h, err
 }
 
+func (p *Postgres) EventsByRef(ctx context.Context, ref string) ([]*Event, error) {
+	const q = `SELECT id, ts, session_id, turn_id, actor_type, actor_id, actor_model,
+		kind, payload, parents, refs, hash, prev_hash, sig
+		FROM events WHERE $1 = ANY(refs) ORDER BY ts ASC, id ASC`
+	rows, err := p.pool.Query(ctx, q, ref)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Event
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) AppendLink(ctx context.Context, l *Link) error {
+	const q = `INSERT INTO links (from_event, to_event, relation, confidence, inferred_by)
+		VALUES ($1, $2, $3, $4, $5)`
+	_, err := p.pool.Exec(ctx, q, l.FromEvent, l.ToEvent, l.Relation, l.Confidence, l.InferredBy)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+		return ErrDuplicate
+	}
+	return err
+}
+
+func (p *Postgres) LinksForEvent(ctx context.Context, eventID string) ([]*Link, error) {
+	const q = `SELECT from_event, to_event, relation, confidence, inferred_by
+		FROM links WHERE from_event = $1 OR to_event = $1
+		ORDER BY relation, from_event, to_event`
+	rows, err := p.pool.Query(ctx, q, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Link
+	for rows.Next() {
+		var l Link
+		if err := rows.Scan(&l.FromEvent, &l.ToEvent, &l.Relation, &l.Confidence, &l.InferredBy); err != nil {
+			return nil, err
+		}
+		out = append(out, &l)
+	}
+	return out, rows.Err()
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }

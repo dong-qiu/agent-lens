@@ -13,6 +13,16 @@ type Event {
   refs: [ID!]!
   hash: String!
   prevHash: String
+  """All links touching this event in either direction (from/to)."""
+  links: [Link!]!
+}
+
+type Link {
+  fromEvent: ID!
+  toEvent: ID!
+  relation: String!
+  confidence: Float!
+  inferredBy: String!
 }
 
 type Actor {

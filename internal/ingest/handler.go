@@ -57,14 +57,27 @@ var validKinds = map[string]struct{}{
 // into the store. Construct one per process and share it between every
 // ingest path (HTTP NDJSON, webhook, programmatic) so the cache stays
 // authoritative.
+//
+// AfterAppend, when set, is invoked outside the per-handler lock with
+// every successfully-stored event. It is the hook used by linkers,
+// metrics, and any other observer that should not be on the write path.
 type Handler struct {
 	st    store.Store
 	mu    sync.Mutex
 	heads map[string]string
+	after func(context.Context, *WireEvent)
 }
 
 func NewHandler(st store.Store) *Handler {
 	return &Handler{st: st, heads: map[string]string{}}
+}
+
+// AfterAppend registers a hook called after every successful Append.
+// The hook runs outside the handler's lock so it can do its own I/O
+// without blocking other ingest paths. Set once during wiring; the
+// field is not protected for concurrent assignment.
+func (h *Handler) AfterAppend(fn func(context.Context, *WireEvent)) {
+	h.after = fn
 }
 
 // WireEvent is the JSON shape accepted on the wire. It mirrors
@@ -123,8 +136,19 @@ func (h *Handler) IngestNDJSON(w http.ResponseWriter, r *http.Request) {
 // Append validates an event, computes its hash chain entry, persists
 // it, and advances the in-memory head cache. The lock spans only the
 // load-prev → compute → append → cache update sequence; canonical
-// marshaling happens before the lock since it does not depend on prev.
+// marshaling happens before the lock, and the AfterAppend hook (if
+// any) runs after the lock is released.
 func (h *Handler) Append(ctx context.Context, in *WireEvent) error {
+	if err := h.appendLocked(ctx, in); err != nil {
+		return err
+	}
+	if h.after != nil {
+		h.after(ctx, in)
+	}
+	return nil
+}
+
+func (h *Handler) appendLocked(ctx context.Context, in *WireEvent) error {
 	if err := validateWireEvent(in); err != nil {
 		return err
 	}
