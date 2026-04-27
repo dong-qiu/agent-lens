@@ -53,12 +53,20 @@ func pae(payloadType string, payload []byte) []byte {
 // Sign returns a DSSE envelope wrapping payload with one ed25519 signature.
 // payloadType identifies what the payload is (e.g.
 // "application/vnd.in-toto+json").
+//
+// Empty payloads are rejected: an attestation over zero bytes is a
+// degenerate case that no legitimate caller wants, and accepting it
+// would let an attacker forge a "valid" envelope whose payload reads
+// as nothing.
 func Sign(priv *PrivateKey, payloadType string, payload []byte) (*Envelope, error) {
 	if priv == nil {
 		return nil, errors.New("nil private key")
 	}
 	if payloadType == "" {
 		return nil, errors.New("empty payload type")
+	}
+	if len(payload) == 0 {
+		return nil, errors.New("empty payload")
 	}
 	msg := pae(payloadType, payload)
 	sig := ed25519.Sign(priv.Key, msg)
@@ -77,6 +85,12 @@ func Sign(priv *PrivateKey, payloadType string, payload []byte) (*Envelope, erro
 // Multiple signatures: any signature matching pub validates the
 // envelope. Mismatched key ids are skipped (not an error) so a multi-
 // signed envelope verifies under each individual key.
+//
+// Errors distinguish "wrong key file" from "signature didn't match":
+//   - if no signature in the envelope shares pub's keyid, the error
+//     names the missing keyid (operator likely supplied the wrong .pub)
+//   - if a keyid matched but the signature bytes failed verification,
+//     the error says so (envelope is corrupt or tampered)
 func Verify(pub *PublicKey, env *Envelope) ([]byte, string, error) {
 	if pub == nil {
 		return nil, "", errors.New("nil public key")
@@ -91,11 +105,17 @@ func Verify(pub *PublicKey, env *Envelope) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("decode payload: %w", err)
 	}
+	if len(payload) == 0 {
+		return nil, "", errors.New("envelope payload is empty")
+	}
+
 	msg := pae(env.PayloadType, payload)
+	matchedKeyID := false
 	for _, s := range env.Signatures {
 		if pub.KeyID != "" && s.KeyID != "" && s.KeyID != pub.KeyID {
 			continue
 		}
+		matchedKeyID = true
 		sig, err := base64.StdEncoding.DecodeString(s.Sig)
 		if err != nil {
 			continue
@@ -104,7 +124,10 @@ func Verify(pub *PublicKey, env *Envelope) ([]byte, string, error) {
 			return payload, env.PayloadType, nil
 		}
 	}
-	return nil, "", errors.New("no valid signature for the provided public key")
+	if !matchedKeyID {
+		return nil, "", fmt.Errorf("no signature with keyid %q in envelope", pub.KeyID)
+	}
+	return nil, "", errors.New("signature(s) for matching keyid did not verify against the public key")
 }
 
 // keyIDFor returns sha256(pubBytes)[:8] hex-encoded — a deterministic
