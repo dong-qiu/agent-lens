@@ -19,6 +19,7 @@ import (
 	"github.com/dongqiu/agent-lens/internal/linking"
 	"github.com/dongqiu/agent-lens/internal/query"
 	"github.com/dongqiu/agent-lens/internal/store"
+	deploywh "github.com/dongqiu/agent-lens/internal/webhooks/deploy"
 	githubwh "github.com/dongqiu/agent-lens/internal/webhooks/github"
 )
 
@@ -89,6 +90,22 @@ func main() {
 			http.Error(w, "webhook receiver disabled (AGENT_LENS_GH_WEBHOOK_SECRET unset)", http.StatusServiceUnavailable)
 		})
 		slog.Info("AGENT_LENS_GH_WEBHOOK_SECRET unset; /webhooks/github returns 503")
+	}
+
+	// /webhooks/deploy uses bearer-token auth (most deploy systems
+	// don't sign webhook bodies). Token is separate from /v1's
+	// AGENT_LENS_TOKEN so a deploy system gets write-only credentials.
+	if deployToken := os.Getenv("AGENT_LENS_DEPLOY_WEBHOOK_TOKEN"); deployToken != "" {
+		r.Group(func(authed chi.Router) {
+			authed.Use(auth.RequireToken(deployToken))
+			authed.Post("/webhooks/deploy", deploywh.NewHandler(ingestH).ServeHTTP)
+		})
+		slog.Info("deploy webhook enabled", "path", "/webhooks/deploy")
+	} else {
+		r.Post("/webhooks/deploy", func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "deploy webhook receiver disabled (AGENT_LENS_DEPLOY_WEBHOOK_TOKEN unset)", http.StatusServiceUnavailable)
+		})
+		slog.Info("AGENT_LENS_DEPLOY_WEBHOOK_TOKEN unset; /webhooks/deploy returns 503")
 	}
 
 	srv := &http.Server{

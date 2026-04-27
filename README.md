@@ -71,7 +71,8 @@ make web-build         # TS 类型检查 + Vite 打包
 - `AGENT_LENS_PG_DSN`（默认本地 compose 配置）
 - `AGENT_LENS_TOKEN`：bearer token；空则 `/v1` 不鉴权（dev 默认）。配置后 hook 与浏览器都需带 `Authorization: Bearer <token>`
 - `AGENT_LENS_PLAYGROUND`：设为 `true` 才挂载 `/v1/playground`（默认 off，避免生产暴露 introspection）
-- `AGENT_LENS_GH_WEBHOOK_SECRET`：GitHub webhook 共享密钥；空则 `/webhooks/github` 不挂载。设置后 server 用 HMAC-SHA256 校验 `X-Hub-Signature-256`
+- `AGENT_LENS_GH_WEBHOOK_SECRET`：GitHub webhook 共享密钥；空则 `/webhooks/github` 返 503。设置后 server 用 HMAC-SHA256 校验 `X-Hub-Signature-256`
+- `AGENT_LENS_DEPLOY_WEBHOOK_TOKEN`：deploy webhook 独立 bearer token（与 `AGENT_LENS_TOKEN` 分离）；空则 `/webhooks/deploy` 返 503
 
 **Hook (`agent-lens-hook`)**
 - `AGENT_LENS_URL`（默认 `http://localhost:8787`）
@@ -104,6 +105,37 @@ v1 仅校验 `prev_hash → hash` 链路完整性，**不**重新从内容推导
    - `push` → `kind=push`，session `github-push:<owner>/<repo>/<branch>`
    - `workflow_run` → `kind=build`，session `github-build:<owner>/<repo>/<run_id>`，三种 lifecycle（requested / in_progress / completed）汇入同一 run session
 4. 全部事件都把相关 commit SHA 写入 `refs[git:<sha>]`，linking worker 自动跟本地 commit hook 上报的 COMMIT 事件串联
+
+## 接入部署系统（M3-A）
+
+`/webhooks/deploy` 接收一种 generic JSON shape，K8s post-deploy job、Argo CD notification、Helm post-render hook、自定义 curl 都能用同一个端点。
+
+```bash
+curl -X POST https://<server>/webhooks/deploy \
+  -H "Authorization: Bearer $AGENT_LENS_DEPLOY_WEBHOOK_TOKEN" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "environment": "production",
+    "git_sha": "deadbeefcafe1234567890abcdef0123456789ab",
+    "image_digest": "sha256:abcdef0123456789",
+    "image": "ghcr.io/acme/widget",
+    "status": "succeeded",
+    "deployed_by": "alice",
+    "platform": "k8s",
+    "cluster": "prod-us-east"
+  }'
+```
+
+事件落到 session `deploy:<environment>`（例：`deploy:production`），refs 自动写 `git:<git_sha>` 和 `image:<digest>`。linker 把 deploy 跟之前的 commit / PR / build 串起来。
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `environment` | ✅ | 决定 session_id（按环境分组所有部署历史） |
+| `git_sha` 或 `image_digest` | 至少一个 | 决定 refs，linker 串接的入口 |
+| `Idempotency-Key` header | 推荐 | 做 server 端 dedup；不传则每次都新事件 |
+
+Token 配置：在 server 端设 `AGENT_LENS_DEPLOY_WEBHOOK_TOKEN=<random>`（与 `AGENT_LENS_TOKEN` **分离**，便于给部署系统最小权限）。未设则 `/webhooks/deploy` 返 503。
 
 ## 在 CI 里上报 build 事件 + artifact hash
 
