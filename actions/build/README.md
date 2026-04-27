@@ -70,6 +70,23 @@ See [`examples/github-actions/build.yml`](../../examples/github-actions/build.ym
 
 Re-running a workflow attempt produces a new event (the server fills a new ULID per call) — they're distinct attempts, not duplicates. The webhook's `run_attempt` lifecycle deliveries are still deduplicated via `X-GitHub-Delivery`.
 
+## Runtime requirements
+
+- **bash 4+** (default on every GitHub-hosted runner)
+- **python3** (preinstalled on every GitHub-hosted runner; used to build the JSON payload without bash quoting hell)
+- **sha256sum** (Linux) or **shasum** (macOS) — auto-detected
+- **GNU stat** (Linux) or **BSD stat** (macOS) — auto-detected
+
+Self-hosted runners need to provide bash + python3.
+
 ## Runner OS support
 
-Tested on `ubuntu-latest` and `macos-latest`. Both `sha256sum` (Linux) and `shasum -a 256` (macOS) are detected. Windows runners would need bash + Python3 in PATH; not currently exercised.
+Exercised on `ubuntu-latest` (Linux) by [`smoke_test.sh`](./smoke_test.sh) which the `action-smoke` CI job runs on every PR. macOS runners pass the same code paths via the `shasum` / BSD-stat branches but aren't gated in CI today. Windows runners are not supported.
+
+## Local smoke test
+
+```bash
+bash actions/build/smoke_test.sh
+```
+
+Mocks `curl` and validates that send.sh produces well-formed JSON for a fixture of three artifact files.

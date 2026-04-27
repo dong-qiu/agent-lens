@@ -19,6 +19,15 @@ set -euo pipefail
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is missing — only meaningful inside GitHub Actions}"
 : "${GITHUB_RUN_ID:?GITHUB_RUN_ID is missing — only meaningful inside GitHub Actions}"
 
+# python3 builds the JSON payload (avoids fighting bash quoting twice)
+# and is preinstalled on every GitHub-hosted runner. Self-hosted runners
+# without it get a clear failure mode here rather than a confusing
+# "command not found" mid-heredoc.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "agent-lens-build: python3 is required (preinstalled on GitHub-hosted runners; install manually on self-hosted)" >&2
+  exit 1
+fi
+
 url="${AGENT_LENS_URL%/}"
 session_id="${AGENT_LENS_SESSION_ID:-github-build:${GITHUB_REPOSITORY}/${GITHUB_RUN_ID}}"
 artifacts_input="${AGENT_LENS_ARTIFACTS:-}"
