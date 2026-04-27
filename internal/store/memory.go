@@ -12,10 +12,14 @@ type Memory struct {
 	mu     sync.Mutex
 	events []*Event
 	byID   map[string]*Event
+	links  map[string]Link // key: from|to|relation
 }
 
 func NewMemory() *Memory {
-	return &Memory{byID: map[string]*Event{}}
+	return &Memory{
+		byID:  map[string]*Event{},
+		links: map[string]Link{},
+	}
 }
 
 func (m *Memory) Close() error { return nil }
@@ -83,4 +87,44 @@ func (m *Memory) HeadHash(_ context.Context, sessionID string) (string, error) {
 		}
 	}
 	return head, nil
+}
+
+func (m *Memory) EventsByRef(_ context.Context, ref string) ([]*Event, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []*Event
+	for _, e := range m.events {
+		for _, r := range e.Refs {
+			if r == ref {
+				cp := *e
+				out = append(out, &cp)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func (m *Memory) AppendLink(_ context.Context, l *Link) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := l.FromEvent + "|" + l.ToEvent + "|" + l.Relation
+	if _, exists := m.links[key]; exists {
+		return ErrDuplicate
+	}
+	m.links[key] = *l
+	return nil
+}
+
+func (m *Memory) LinksForEvent(_ context.Context, eventID string) ([]*Link, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []*Link
+	for _, l := range m.links {
+		if l.FromEvent == eventID || l.ToEvent == eventID {
+			cp := l
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
 }

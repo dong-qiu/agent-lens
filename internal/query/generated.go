@@ -29,6 +29,7 @@ func NewExecutableSchema(cfg Config) graphql.ExecutableSchema {
 type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 
 type ResolverRoot interface {
+	Event() EventResolver
 	Query() QueryResolver
 }
 
@@ -47,6 +48,7 @@ type ComplexityRoot struct {
 		Hash      func(childComplexity int) int
 		ID        func(childComplexity int) int
 		Kind      func(childComplexity int) int
+		Links     func(childComplexity int) int
 		Parents   func(childComplexity int) int
 		Payload   func(childComplexity int) int
 		PrevHash  func(childComplexity int) int
@@ -56,6 +58,14 @@ type ComplexityRoot struct {
 		TurnID    func(childComplexity int) int
 	}
 
+	Link struct {
+		Confidence func(childComplexity int) int
+		FromEvent  func(childComplexity int) int
+		InferredBy func(childComplexity int) int
+		Relation   func(childComplexity int) int
+		ToEvent    func(childComplexity int) int
+	}
+
 	Query struct {
 		Event       func(childComplexity int, id string) int
 		Events      func(childComplexity int, sessionID string, limit *int) int
@@ -63,6 +73,9 @@ type ComplexityRoot struct {
 	}
 }
 
+type EventResolver interface {
+	Links(ctx context.Context, obj *Event) ([]*Link, error)
+}
 type QueryResolver interface {
 	Event(ctx context.Context, id string) (*Event, error)
 	Events(ctx context.Context, sessionID string, limit *int) ([]*Event, error)
@@ -126,6 +139,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Event.Kind(childComplexity), true
+	case "Event.links":
+		if e.ComplexityRoot.Event.Links == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Event.Links(childComplexity), true
 	case "Event.parents":
 		if e.ComplexityRoot.Event.Parents == nil {
 			break
@@ -168,6 +187,37 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Event.TurnID(childComplexity), true
+
+	case "Link.confidence":
+		if e.ComplexityRoot.Link.Confidence == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Link.Confidence(childComplexity), true
+	case "Link.fromEvent":
+		if e.ComplexityRoot.Link.FromEvent == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Link.FromEvent(childComplexity), true
+	case "Link.inferredBy":
+		if e.ComplexityRoot.Link.InferredBy == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Link.InferredBy(childComplexity), true
+	case "Link.relation":
+		if e.ComplexityRoot.Link.Relation == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Link.Relation(childComplexity), true
+	case "Link.toEvent":
+		if e.ComplexityRoot.Link.ToEvent == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Link.ToEvent(childComplexity), true
 
 	case "Query.event":
 		if e.ComplexityRoot.Query.Event == nil {
@@ -326,8 +376,26 @@ func (ec *executionContext) childFields_Event(ctx context.Context, field graphql
 		return ec.fieldContext_Event_hash(ctx, field)
 	case "prevHash":
 		return ec.fieldContext_Event_prevHash(ctx, field)
+	case "links":
+		return ec.fieldContext_Event_links(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type Event", field.Name)
+}
+
+func (ec *executionContext) childFields_Link(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "fromEvent":
+		return ec.fieldContext_Link_fromEvent(ctx, field)
+	case "toEvent":
+		return ec.fieldContext_Link_toEvent(ctx, field)
+	case "relation":
+		return ec.fieldContext_Link_relation(ctx, field)
+	case "confidence":
+		return ec.fieldContext_Link_confidence(ctx, field)
+	case "inferredBy":
+		return ec.fieldContext_Link_inferredBy(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type Link", field.Name)
 }
 
 func (ec *executionContext) childFields___Directive(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
@@ -903,6 +971,153 @@ func (ec *executionContext) _Event_prevHash(ctx context.Context, field graphql.C
 }
 func (ec *executionContext) fieldContext_Event_prevHash(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("Event", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Event_links(ctx context.Context, field graphql.CollectedField, obj *Event) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Event_links(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Event().Links(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*Link) graphql.Marshaler {
+			return ec.marshalNLink2ᚕᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐLinkᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Event_links(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Event",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_Link(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Link_fromEvent(ctx context.Context, field graphql.CollectedField, obj *Link) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Link_fromEvent(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.FromEvent, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNID2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Link_fromEvent(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Link", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Link_toEvent(ctx context.Context, field graphql.CollectedField, obj *Link) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Link_toEvent(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ToEvent, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNID2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Link_toEvent(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Link", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Link_relation(ctx context.Context, field graphql.CollectedField, obj *Link) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Link_relation(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Relation, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Link_relation(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Link", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Link_confidence(ctx context.Context, field graphql.CollectedField, obj *Link) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Link_confidence(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Confidence, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v float64) graphql.Marshaler {
+			return ec.marshalNFloat2float64(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Link_confidence(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Link", field, false, false, errors.New("field of type Float does not have child fields"))
+}
+
+func (ec *executionContext) _Link_inferredBy(ctx context.Context, field graphql.CollectedField, obj *Link) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Link_inferredBy(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.InferredBy, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Link_inferredBy(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Link", field, false, false, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _Query_event(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
@@ -2240,49 +2455,144 @@ func (ec *executionContext) _Event(ctx context.Context, sel ast.SelectionSet, ob
 		case "id":
 			out.Values[i] = ec._Event_id(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "ts":
 			out.Values[i] = ec._Event_ts(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "sessionId":
 			out.Values[i] = ec._Event_sessionId(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "turnId":
 			out.Values[i] = ec._Event_turnId(ctx, field, obj)
 		case "actor":
 			out.Values[i] = ec._Event_actor(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "kind":
 			out.Values[i] = ec._Event_kind(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "payload":
 			out.Values[i] = ec._Event_payload(ctx, field, obj)
 		case "parents":
 			out.Values[i] = ec._Event_parents(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "refs":
 			out.Values[i] = ec._Event_refs(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "hash":
 			out.Values[i] = ec._Event_hash(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "prevHash":
 			out.Values[i] = ec._Event_prevHash(ctx, field, obj)
+		case "links":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Event_links(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferred), math.MaxInt32)))
+
+	for label, dfs := range deferred {
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var linkImplementors = []string{"Link"}
+
+func (ec *executionContext) _Link(ctx context.Context, sel ast.SelectionSet, obj *Link) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, linkImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("Link")
+		case "fromEvent":
+			out.Values[i] = ec._Link_fromEvent(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "toEvent":
+			out.Values[i] = ec._Link_toEvent(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "relation":
+			out.Values[i] = ec._Link_relation(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "confidence":
+			out.Values[i] = ec._Link_confidence(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "inferredBy":
+			out.Values[i] = ec._Link_inferredBy(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -2826,6 +3136,22 @@ func (ec *executionContext) marshalNEventKind2githubᚗcomᚋdongqiuᚋagentᚑl
 	return v
 }
 
+func (ec *executionContext) unmarshalNFloat2float64(ctx context.Context, v any) (float64, error) {
+	res, err := graphql.UnmarshalFloatContext(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNFloat2float64(ctx context.Context, sel ast.SelectionSet, v float64) graphql.Marshaler {
+	_ = sel
+	res := graphql.MarshalFloatContext(v)
+	if res == graphql.Null {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+	}
+	return graphql.WrapContextMarshaler(ctx, res)
+}
+
 func (ec *executionContext) unmarshalNID2string(ctx context.Context, v any) (string, error) {
 	res, err := graphql.UnmarshalID(v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -2870,6 +3196,32 @@ func (ec *executionContext) marshalNID2ᚕstringᚄ(ctx context.Context, sel ast
 	}
 
 	return ret
+}
+
+func (ec *executionContext) marshalNLink2ᚕᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐLinkᚄ(ctx context.Context, sel ast.SelectionSet, v []*Link) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNLink2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐLink(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNLink2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐLink(ctx context.Context, sel ast.SelectionSet, v *Link) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._Link(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNString2string(ctx context.Context, v any) (string, error) {

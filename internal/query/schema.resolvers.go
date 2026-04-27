@@ -12,6 +12,22 @@ import (
 	"github.com/dongqiu/agent-lens/internal/store"
 )
 
+// Links is the resolver for the links field.
+func (r *eventResolver) Links(ctx context.Context, obj *Event) ([]*Link, error) {
+	if obj == nil {
+		return nil, nil
+	}
+	raw, err := r.Store.LinksForEvent(ctx, obj.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*Link, 0, len(raw))
+	for _, l := range raw {
+		out = append(out, toGQLLink(l))
+	}
+	return out, nil
+}
+
 // Event is the resolver for the event field.
 func (r *queryResolver) Event(ctx context.Context, id string) (*Event, error) {
 	se, err := r.Store.GetEvent(ctx, id)
@@ -46,7 +62,11 @@ func (r *queryResolver) SessionHead(ctx context.Context, sessionID string) (stri
 	return r.Store.HeadHash(ctx, sessionID)
 }
 
+// Event returns EventResolver implementation.
+func (r *Resolver) Event() EventResolver { return &eventResolver{r} }
+
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
+type eventResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }

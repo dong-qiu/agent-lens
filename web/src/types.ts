@@ -20,6 +20,14 @@ export type Actor = {
   model?: string | null;
 };
 
+export type Link = {
+  fromEvent: string;
+  toEvent: string;
+  relation: string;
+  confidence: number;
+  inferredBy: string;
+};
+
 export type Event = {
   id: string;
   ts: string;
@@ -32,6 +40,7 @@ export type Event = {
   refs: string[];
   hash: string;
   prevHash?: string | null;
+  links: Link[];
 };
 
 export type EventsResponse = {

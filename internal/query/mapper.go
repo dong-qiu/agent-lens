@@ -56,3 +56,16 @@ func nonNilStrings(s []string) []string {
 	}
 	return s
 }
+
+func toGQLLink(l *store.Link) *Link {
+	if l == nil {
+		return nil
+	}
+	return &Link{
+		FromEvent:  l.FromEvent,
+		ToEvent:    l.ToEvent,
+		Relation:   l.Relation,
+		Confidence: float64(l.Confidence),
+		InferredBy: l.InferredBy,
+	}
+}

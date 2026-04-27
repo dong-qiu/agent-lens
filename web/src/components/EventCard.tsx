@@ -32,6 +32,20 @@ export function EventCard({ event }: { event: Event }) {
               {event.actor.type.toLowerCase()} · {event.actor.id}
               {event.actor.model ? ` · ${event.actor.model}` : ""}
             </span>
+            {event.links?.length > 0 && (
+              <span
+                className="inline-flex items-center gap-0.5 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 ring-1 ring-zinc-300"
+                title={event.links
+                  .map((l) =>
+                    l.fromEvent === event.id
+                      ? `→ ${l.toEvent} (${l.relation})`
+                      : `← ${l.fromEvent} (${l.relation})`,
+                  )
+                  .join("\n")}
+              >
+                ↔ {event.links.length}
+              </span>
+            )}
           </div>
           {summary && (
             <div className="mt-1.5 text-sm text-zinc-800 break-words">

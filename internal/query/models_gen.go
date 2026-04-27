@@ -28,6 +28,16 @@ type Event struct {
 	Refs      []string       `json:"refs"`
 	Hash      string         `json:"hash"`
 	PrevHash  *string        `json:"prevHash,omitempty"`
+	// All links touching this event in either direction (from/to).
+	Links []*Link `json:"links"`
+}
+
+type Link struct {
+	FromEvent  string  `json:"fromEvent"`
+	ToEvent    string  `json:"toEvent"`
+	Relation   string  `json:"relation"`
+	Confidence float64 `json:"confidence"`
+	InferredBy string  `json:"inferredBy"`
 }
 
 type Query struct {

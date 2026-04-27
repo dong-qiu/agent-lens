@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 	"github.com/dongqiu/agent-lens/internal/auth"
 	"github.com/dongqiu/agent-lens/internal/ingest"
+	"github.com/dongqiu/agent-lens/internal/linking"
 	"github.com/dongqiu/agent-lens/internal/query"
 	"github.com/dongqiu/agent-lens/internal/store"
 	githubwh "github.com/dongqiu/agent-lens/internal/webhooks/github"
@@ -57,6 +59,19 @@ func main() {
 	// cache stays authoritative.
 	ingestH := ingest.NewHandler(st)
 
+	// Linking worker observes successful appends and writes shared-ref
+	// links asynchronously so it never blocks ingest.
+	linker := linking.New(st, 1024)
+	ingestH.AfterAppend(func(_ context.Context, ev *ingest.WireEvent) {
+		linker.Notify(ev)
+	})
+	var linkerWG sync.WaitGroup
+	linkerWG.Add(1)
+	go func() {
+		defer linkerWG.Done()
+		linker.Run(ctx)
+	}()
+
 	r.Route("/v1", func(sub chi.Router) {
 		sub.Use(auth.RequireToken(token))
 		sub.Post("/events", ingestH.IngestNDJSON)
@@ -95,6 +110,10 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
+	// Linker.Run returns once ctx is cancelled; wait so any in-flight
+	// AppendLink finishes (or errors out cleanly) before we exit and
+	// the process tears down the DB connection pool.
+	linkerWG.Wait()
 }
 
 func envOr(k, def string) string {
