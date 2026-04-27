@@ -93,6 +93,23 @@ function summarize(event: Event): string {
       const text = asString(p.text);
       return text ? `${marker} · ${clip(text)}` : marker;
     }
+    case "REVIEW": {
+      const review = (p.review ?? {}) as Record<string, unknown>;
+      const action = asString(p.action);
+      const state = asString(review.state);
+      const body = asString(review.body);
+      const head = [action, state].filter(Boolean).join(" · ");
+      return body ? `${head} · ${clip(body)}` : head;
+    }
+    case "PUSH": {
+      const ref = asString(p.ref).replace(/^refs\/(heads|tags)\//, "");
+      const after = asString(p.after).slice(0, 7);
+      const commits = Array.isArray(p.commits) ? p.commits.length : 0;
+      const parts = [ref];
+      if (after) parts.push(after);
+      if (commits > 0) parts.push(`${commits} commit${commits === 1 ? "" : "s"}`);
+      return parts.join(" · ");
+    }
     default:
       return "";
   }

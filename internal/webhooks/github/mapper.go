@@ -3,6 +3,7 @@ package github
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dongqiu/agent-lens/internal/ingest"
@@ -71,4 +72,144 @@ func mapPullRequest(raw json.RawMessage, deliveryID string) (*ingest.WireEvent, 
 		Payload: raw,
 		Refs:    refs,
 	}, nil
+}
+
+// pullRequestReviewPayload reads the small subset needed to derive
+// session_id / refs / actor. The PR review session is the same as the
+// PR's so reviews show up under the PR timeline alongside pr events.
+type pullRequestReviewPayload struct {
+	Review struct {
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	} `json:"review"`
+	PullRequest struct {
+		Number int `json:"number"`
+		Head   struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+	} `json:"pull_request"`
+	Repository struct {
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+	Sender struct {
+		Login string `json:"login"`
+	} `json:"sender"`
+}
+
+func mapPullRequestReview(raw json.RawMessage, deliveryID string) (*ingest.WireEvent, error) {
+	var p pullRequestReviewPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("decode pull_request_review: %w", err)
+	}
+	if p.Repository.FullName == "" || p.PullRequest.Number == 0 {
+		return nil, fmt.Errorf("pull_request_review missing repository.full_name or pull_request.number")
+	}
+
+	actorID := p.Sender.Login
+	if actorID == "" {
+		actorID = p.Review.User.Login
+	}
+
+	var refs []string
+	if p.PullRequest.Head.SHA != "" {
+		refs = []string{"git:" + p.PullRequest.Head.SHA}
+	}
+
+	return &ingest.WireEvent{
+		ID:        deliveryID,
+		TS:        time.Now().UTC(),
+		SessionID: fmt.Sprintf("github-pr:%s/%d", p.Repository.FullName, p.PullRequest.Number),
+		Actor: ingest.WireActor{
+			Type: "human",
+			ID:   actorID,
+		},
+		Kind:    "review",
+		Payload: raw,
+		Refs:    refs,
+	}, nil
+}
+
+// pushPayload reads the branch ref + per-commit shas. session_id groups
+// pushes per branch; refs include head + every commit in the push so the
+// linker can connect this remote-side event to local commit events the
+// git-post-commit hook produced.
+type pushPayload struct {
+	Ref     string `json:"ref"`     // refs/heads/<branch> or refs/tags/<tag>
+	After   string `json:"after"`   // head sha after the push
+	Deleted bool   `json:"deleted"` // true when branch was deleted
+	Commits []struct {
+		ID string `json:"id"`
+	} `json:"commits"`
+	Repository struct {
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+	Pusher struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	} `json:"pusher"`
+	Sender struct {
+		Login string `json:"login"`
+	} `json:"sender"`
+}
+
+func mapPush(raw json.RawMessage, deliveryID string) (*ingest.WireEvent, error) {
+	var p pushPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("decode push: %w", err)
+	}
+	if p.Repository.FullName == "" || p.Ref == "" {
+		return nil, fmt.Errorf("push missing repository.full_name or ref")
+	}
+
+	branch := strings.TrimPrefix(p.Ref, "refs/heads/")
+	branch = strings.TrimPrefix(branch, "refs/tags/")
+
+	actorID := p.Sender.Login
+	if actorID == "" {
+		actorID = p.Pusher.Name
+	}
+
+	// Refs: head sha + every commit sha in the push, deduplicated.
+	// Branch deletion (after = "0000000...") is skipped from refs so
+	// linker doesn't try to look it up.
+	seen := map[string]struct{}{}
+	var refs []string
+	addRef := func(sha string) {
+		if sha == "" || isZeroSHA(sha) {
+			return
+		}
+		key := "git:" + sha
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		refs = append(refs, key)
+	}
+	addRef(p.After)
+	for _, c := range p.Commits {
+		addRef(c.ID)
+	}
+
+	return &ingest.WireEvent{
+		ID:        deliveryID,
+		TS:        time.Now().UTC(),
+		SessionID: fmt.Sprintf("github-push:%s/%s", p.Repository.FullName, branch),
+		Actor: ingest.WireActor{
+			Type: "human",
+			ID:   actorID,
+		},
+		Kind:    "push",
+		Payload: raw,
+		Refs:    refs,
+	}, nil
+}
+
+func isZeroSHA(s string) bool {
+	for _, r := range s {
+		if r != '0' {
+			return false
+		}
+	}
+	return s != ""
 }
