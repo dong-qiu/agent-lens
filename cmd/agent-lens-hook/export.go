@@ -25,7 +25,7 @@ Usage:
 Kinds:
   code-provenance   agent-lens.dev/code-provenance/v1 (commit boundary)
   slsa-build        slsa.dev/provenance/v1 (build boundary)
-  deploy-evidence   agent-lens.dev/deploy-evidence/v1 (deploy boundary; M3-B-4)
+  deploy-evidence   agent-lens.dev/deploy-evidence/v1 (deploy boundary)
 `
 
 func runExport(args []string) {
@@ -48,8 +48,10 @@ func runExport(args []string) {
 			os.Exit(1)
 		}
 	case "deploy-evidence":
-		fmt.Fprintln(os.Stderr, "TODO: deploy-evidence (M3-B-4)")
-		os.Exit(1)
+		if err := exportDeployEvidence(args[1:], os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "agent-lens-hook export deploy-evidence: %v\n", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown export kind: %s\n\n%s", args[0], exportUsage)
 		os.Exit(2)
@@ -562,4 +564,245 @@ func buildSLSAInputsFromEvents(events []provenanceEvent, repo string) (attest.SL
 		return in, fmt.Errorf("session has no composite-action build event with artifacts; SLSA build provenance needs ≥1 subject. Run the agent-lens/actions/build action in your workflow to record artifact hashes")
 	}
 	return in, nil
+}
+
+const deployEvidenceUsage = `agent-lens-hook export deploy-evidence — sign an
+agent-lens.dev/deploy-evidence/v1 attestation for a deploy event.
+
+Usage:
+  agent-lens-hook export deploy-evidence \
+    --event <deploy-event-id> \
+    [--build-attestation <file>] [--code-attestation <file>] \
+    [--key <path>] [--out <file>] [--url <url>] [--token <token>]
+
+  --event              deploy event id (required); fetched via GraphQL.
+                       Must be kind=DEPLOY.
+  --build-attestation  upstream build attestation file (.intoto.jsonl);
+                       its sha256 is recorded in predicate.upstream so
+                       a verifier can walk deploy → build.
+  --code-attestation   upstream code-provenance attestation file; its
+                       sha256 is recorded similarly.
+  --key                ed25519 private key path
+                       (default $HOME/.agent-lens/keys/ed25519)
+  --out                output file (default stdout)
+  --url                Agent Lens server URL
+                       (default $AGENT_LENS_URL or http://localhost:8787)
+  --token              bearer token (default $AGENT_LENS_TOKEN)
+  --timeout            HTTP timeout (default 30s)
+
+The attestation's subject is the container image (sha256 of its
+image_digest); the predicate carries environment / cluster / deploy
+metadata plus optional upstream attestation hashes for graph traversal.
+`
+
+func exportDeployEvidence(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("export deploy-evidence", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var (
+		eventID    = fs.String("event", "", "deploy event id (required)")
+		buildAtt   = fs.String("build-attestation", "", "upstream build attestation file")
+		codeAtt    = fs.String("code-attestation", "", "upstream code-provenance attestation file")
+		keyPath    = fs.String("key", "", "ed25519 private key path")
+		outPath    = fs.String("out", "", "output file (default stdout)")
+		urlFlag    = fs.String("url", "", "server URL")
+		tokenFlag  = fs.String("token", "", "bearer token")
+		timeout    = fs.Duration("timeout", 30*time.Second, "HTTP timeout")
+	)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, deployEvidenceUsage) }
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *eventID == "" {
+		fs.Usage()
+		return fmt.Errorf("--event is required")
+	}
+
+	kp := *keyPath
+	if kp == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("home dir: %w", err)
+		}
+		kp = filepath.Join(home, ".agent-lens", "keys", "ed25519")
+	}
+	priv, err := attest.LoadPrivateKey(kp)
+	if err != nil {
+		return fmt.Errorf("load private key from %s: %w", kp, err)
+	}
+
+	url := chooseURL(*urlFlag)
+	token := chooseToken(*tokenFlag)
+	ev, err := fetchEvent(url, token, *eventID, *timeout)
+	if err != nil {
+		return fmt.Errorf("fetch event: %w", err)
+	}
+	if ev == nil {
+		return fmt.Errorf("event %q not found", *eventID)
+	}
+	if ev.Kind != "DEPLOY" {
+		return fmt.Errorf("event %q has kind %q, want DEPLOY", *eventID, ev.Kind)
+	}
+
+	in := buildDeployInputsFromEvent(ev, url)
+	if *buildAtt != "" {
+		d, err := attest.DigestFile(*buildAtt)
+		if err != nil {
+			return fmt.Errorf("hash --build-attestation: %w", err)
+		}
+		in.BuildAttestationDigest = d
+	}
+	if *codeAtt != "" {
+		d, err := attest.DigestFile(*codeAtt)
+		if err != nil {
+			return fmt.Errorf("hash --code-attestation: %w", err)
+		}
+		in.CodeAttestationDigest = d
+	}
+
+	stmt, err := attest.BuildDeployEvidenceStatement(in)
+	if err != nil {
+		return fmt.Errorf("build statement: %w", err)
+	}
+	stmtBytes, err := json.Marshal(stmt)
+	if err != nil {
+		return fmt.Errorf("marshal statement: %w", err)
+	}
+	env, err := attest.Sign(priv, attest.InTotoPayloadType, stmtBytes)
+	if err != nil {
+		return fmt.Errorf("sign: %w", err)
+	}
+	envBytes, err := json.Marshal(env)
+	if err != nil {
+		return fmt.Errorf("marshal envelope: %w", err)
+	}
+	envBytes = append(envBytes, '\n')
+
+	if *outPath != "" {
+		if err := os.WriteFile(*outPath, envBytes, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", *outPath, err)
+		}
+	} else if _, err := out.Write(envBytes); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr,
+		"deploy-evidence attestation written: env=%s, %d bytes, key id %s\n",
+		in.Environment, len(envBytes), priv.KeyID,
+	)
+	return nil
+}
+
+// fetchEventResponse mirrors the shape of `Query.event` in the schema.
+type fetchEventResponse struct {
+	ID        string         `json:"id"`
+	Kind      string         `json:"kind"`
+	SessionID string         `json:"sessionId"`
+	Actor     provenanceActor `json:"actor"`
+	Payload   map[string]any `json:"payload"`
+}
+
+const eventByIDQuery = `query EventByID($id: ID!) {
+  event(id: $id) {
+    id
+    kind
+    sessionId
+    actor { type id model }
+    payload
+  }
+}`
+
+// fetchEvent looks one event up by id; returns (nil, nil) when the
+// server responds with a null event (id not found).
+func fetchEvent(url, token, eventID string, timeout time.Duration) (*fetchEventResponse, error) {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	body, err := json.Marshal(map[string]any{
+		"query":     eventByIDQuery,
+		"variables": map[string]any{"id": eventID},
+	})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(http.MethodPost, url+"/v1/graphql", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode/100 != 2 {
+		raw, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(raw))
+	}
+	var out struct {
+		Data struct {
+			Event *fetchEventResponse `json:"event"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	dec := json.NewDecoder(resp.Body)
+	dec.UseNumber()
+	if err := dec.Decode(&out); err != nil {
+		return nil, err
+	}
+	if len(out.Errors) > 0 {
+		return nil, fmt.Errorf("graphql: %s", out.Errors[0].Message)
+	}
+	return out.Data.Event, nil
+}
+
+// buildDeployInputsFromEvent extracts the deploy fields from the
+// event payload. Image digest can come either bare or with prefix
+// (the deploy webhook accepts either).
+func buildDeployInputsFromEvent(ev *fetchEventResponse, storeURL string) attest.DeployEvidenceInputs {
+	in := attest.DeployEvidenceInputs{
+		StoreURL:         storeURL,
+		TraceRootEventID: ev.ID,
+	}
+	p := ev.Payload
+	if v, _ := p["environment"].(string); v != "" {
+		in.Environment = v
+	}
+	if v, _ := p["image"].(string); v != "" {
+		in.Image = v
+	}
+	if v, _ := p["image_digest"].(string); v != "" {
+		in.ImageDigest = v
+	}
+	if v, _ := p["platform"].(string); v != "" {
+		in.Platform = v
+	}
+	if v, _ := p["cluster"].(string); v != "" {
+		in.Cluster = v
+	}
+	if v, _ := p["namespace"].(string); v != "" {
+		in.Namespace = v
+	}
+	if v, _ := p["deployed_by"].(string); v != "" {
+		in.DeployedBy = v
+	}
+	if v, _ := p["status"].(string); v != "" {
+		in.Status = v
+	}
+	if v, _ := p["git_sha"].(string); v != "" {
+		in.GitCommit = v
+	}
+	// finished_at preferred, fall back to started_at, fall back to
+	// the deploy event's wall-clock id-bearing time isn't available
+	// here without re-querying.
+	if v, _ := p["finished_at"].(string); v != "" {
+		in.DeployedAt = v
+	} else if v, _ := p["started_at"].(string); v != "" {
+		in.DeployedAt = v
+	}
+	return in
 }
