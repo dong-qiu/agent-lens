@@ -223,3 +223,54 @@ func isZeroSHA(s string) bool {
 	}
 	return s != ""
 }
+
+// workflowRunPayload reads the small subset needed to derive
+// session_id / refs / actor for GitHub Actions runs. session_id keys
+// on run_id so the three lifecycle deliveries (requested →
+// in_progress → completed) group together in the timeline.
+type workflowRunPayload struct {
+	WorkflowRun struct {
+		ID      int64  `json:"id"`
+		Name    string `json:"name"`
+		HeadSHA string `json:"head_sha"`
+	} `json:"workflow_run"`
+	Repository struct {
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+}
+
+func mapWorkflowRun(raw json.RawMessage, deliveryID string) (*ingest.WireEvent, error) {
+	var p workflowRunPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("decode workflow_run: %w", err)
+	}
+	if p.Repository.FullName == "" || p.WorkflowRun.ID == 0 {
+		return nil, fmt.Errorf("workflow_run missing repository.full_name or workflow_run.id")
+	}
+
+	// Actor for a build is the system that ran it, not whoever pushed.
+	// Use the workflow name (e.g. "CI") so the UI reads
+	// "system · CI · <sha>" rather than "system · alice · <sha>".
+	actorID := p.WorkflowRun.Name
+	if actorID == "" {
+		actorID = "github-actions"
+	}
+
+	var refs []string
+	if p.WorkflowRun.HeadSHA != "" {
+		refs = []string{"git:" + p.WorkflowRun.HeadSHA}
+	}
+
+	return &ingest.WireEvent{
+		ID:        deliveryID,
+		TS:        time.Now().UTC(),
+		SessionID: fmt.Sprintf("github-build:%s/%d", p.Repository.FullName, p.WorkflowRun.ID),
+		Actor: ingest.WireActor{
+			Type: "system",
+			ID:   actorID,
+		},
+		Kind:    "build",
+		Payload: raw,
+		Refs:    refs,
+	}, nil
+}

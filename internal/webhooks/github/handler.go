@@ -2,9 +2,9 @@
 // shared-secret HMAC, maps known event types into wire events, and
 // forwards them through the ingest pipeline.
 //
-// Supported events: pull_request, pull_request_review, push, ping.
-// Unrecognized event types are politely 204-acked so GitHub stops
-// retrying without surfacing as a webhook failure.
+// Supported events: pull_request, pull_request_review, push,
+// workflow_run, ping. Unrecognized event types are politely 204-acked
+// so GitHub stops retrying without surfacing as a webhook failure.
 package github
 
 import (
@@ -73,6 +73,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		m = mapPullRequestReview
 	case "push":
 		m = mapPush
+	case "workflow_run":
+		m = mapWorkflowRun
 	default:
 		// Unrecognized event types are not an error; GitHub may send
 		// many we don't (yet) care about. Just ack so it doesn't retry.
