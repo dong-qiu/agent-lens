@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
+
+      - name: Report build to Agent Lens
+        if: always()  # land event even on build/test failure
+        uses: dong-qiu/agent-lens/actions/build@main
+        with:
+          url: ${{ vars.AGENT_LENS_URL }}
+          token: ${{ secrets.AGENT_LENS_TOKEN }}
+          status: ${{ job.status }}
+          artifacts: |
+            bin/*
+            dist/*.tar.gz
