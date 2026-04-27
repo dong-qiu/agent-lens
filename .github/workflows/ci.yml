@@ -36,10 +36,9 @@ jobs:
         with:
           go-version: '1.23'
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
           version: latest
-          args: --timeout=5m
 
   integration:
     name: PG integration tests
