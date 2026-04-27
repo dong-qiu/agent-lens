@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -602,6 +603,304 @@ func TestExportSLSABuildBuilderIDFlag(t *testing.T) {
 	_ = json.Unmarshal(stmt.Predicate, &pred)
 	if pred.RunDetails.Builder.ID != "https://acme.example.com/runner/self-hosted" {
 		t.Errorf("builder.id = %q, want override", pred.RunDetails.Builder.ID)
+	}
+}
+
+// postDeployEvent injects a kind=deploy event via NDJSON so we don't
+// need to wire the deploy webhook handler into every test. It returns
+// the server-assigned event id (read back via GraphQL) so the exporter
+// has something to look up.
+func postDeployEvent(t *testing.T, srvURL, sessionID string, payload map[string]any) string {
+	t.Helper()
+	rawPayload, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := map[string]any{
+		"session_id": sessionID,
+		"actor":      map[string]any{"type": "system", "id": "deploy-system"},
+		"kind":       "deploy",
+		"payload":    json.RawMessage(rawPayload),
+	}
+	wireBytes, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(srvURL+"/v1/events", "application/x-ndjson", bytes.NewReader(wireBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// Read the event id back via GraphQL — NDJSON's HTTP response body
+	// only carries counts, not assigned ids.
+	gqlBody, _ := json.Marshal(map[string]any{
+		"query": `query($s: String!) { events(sessionId: $s, limit: 10) { id } }`,
+		"variables": map[string]any{"s": sessionID},
+	})
+	resp2, err := http.Post(srvURL+"/v1/graphql", "application/json", bytes.NewReader(gqlBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	var out struct {
+		Data struct {
+			Events []struct {
+				ID string `json:"id"`
+			} `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Data.Events) == 0 {
+		t.Fatalf("no events found for session %q", sessionID)
+	}
+	return out.Data.Events[0].ID
+}
+
+func TestExportDeployEvidenceEndToEnd(t *testing.T) {
+	st := store.NewMemory()
+	r := chi.NewRouter()
+	r.Route("/v1", func(sub chi.Router) {
+		ingest.RegisterRoutes(sub, st)
+		query.RegisterRoutes(sub, st)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	eventID := postDeployEvent(t, srv.URL, "deploy:production", map[string]any{
+		"environment":  "production",
+		"image":        "ghcr.io/acme/widget",
+		"image_digest": "sha256:deadbeef0123456789",
+		"platform":     "k8s",
+		"cluster":      "prod-us-east",
+		"namespace":    "default",
+		"deployed_by":  "alice",
+		"status":       "succeeded",
+		"git_sha":      "feedface1234",
+		"started_at":   "2026-04-27T10:00:00Z",
+		"finished_at":  "2026-04-27T10:01:00Z",
+	})
+
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519")
+	priv, pub, _ := attest.GenerateKey()
+	_ = attest.SaveKeyPair(keyPath, priv)
+
+	// Pre-create dummy upstream attestation files so DigestFile has
+	// something to hash. Real callers point at .intoto.jsonl outputs
+	// from earlier export runs.
+	buildAtt := filepath.Join(dir, "build.intoto.jsonl")
+	codeAtt := filepath.Join(dir, "code.intoto.jsonl")
+	if err := os.WriteFile(buildAtt, []byte("BUILD-ATTESTATION-CONTENTS"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codeAtt, []byte("CODE-ATTESTATION-CONTENTS"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	args := []string{
+		"--event", eventID,
+		"--build-attestation", buildAtt,
+		"--code-attestation", codeAtt,
+		"--key", keyPath,
+		"--url", srv.URL,
+	}
+	if err := exportDeployEvidence(args, &buf); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+
+	var env attest.Envelope
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &env); err != nil {
+		t.Fatalf("parse envelope: %v", err)
+	}
+	payload, _, err := attest.Verify(pub, &env)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+
+	var stmt attest.Statement
+	_ = json.Unmarshal(payload, &stmt)
+	if stmt.PredicateType != attest.DeployEvidencePredicate {
+		t.Errorf("predicateType = %q", stmt.PredicateType)
+	}
+	if len(stmt.Subject) != 1 ||
+		stmt.Subject[0].Name != "ghcr.io/acme/widget" ||
+		stmt.Subject[0].Digest["sha256"] != "deadbeef0123456789" {
+		t.Errorf("subject = %+v", stmt.Subject)
+	}
+
+	var pred attest.DeployEvidence
+	_ = json.Unmarshal(stmt.Predicate, &pred)
+	if pred.Environment != "production" {
+		t.Errorf("environment = %q", pred.Environment)
+	}
+	if pred.Cluster != "prod-us-east" {
+		t.Errorf("cluster = %q", pred.Cluster)
+	}
+	if pred.Status != "succeeded" {
+		t.Errorf("status = %q", pred.Status)
+	}
+	if pred.DeployedAt != "2026-04-27T10:01:00Z" {
+		t.Errorf("deployed_at = %q, want finished_at", pred.DeployedAt)
+	}
+	if pred.Upstream.GitCommit != "feedface1234" {
+		t.Errorf("upstream.git_commit = %q", pred.Upstream.GitCommit)
+	}
+	if pred.Upstream.BuildAttestationDigest == "" {
+		t.Errorf("upstream.build_attestation should be a sha256")
+	}
+	wantBuildDigest, _ := attest.DigestFile(buildAtt)
+	if pred.Upstream.BuildAttestationDigest != wantBuildDigest {
+		t.Errorf("upstream.build_attestation = %q, want %q", pred.Upstream.BuildAttestationDigest, wantBuildDigest)
+	}
+	wantCodeDigest, _ := attest.DigestFile(codeAtt)
+	if pred.Upstream.CodeAttestationDigest != wantCodeDigest {
+		t.Errorf("upstream.code_attestation = %q, want %q", pred.Upstream.CodeAttestationDigest, wantCodeDigest)
+	}
+	if pred.TraceRootEventID != eventID {
+		t.Errorf("trace_root_event_id = %q, want %q", pred.TraceRootEventID, eventID)
+	}
+}
+
+func TestExportDeployEvidenceWithoutUpstreamAttestations(t *testing.T) {
+	// Upstream attestation flags are optional — the deploy is still
+	// signable, but predicate.upstream.{build,code} are empty so a
+	// verifier knows the chain is incomplete.
+	st := store.NewMemory()
+	r := chi.NewRouter()
+	r.Route("/v1", func(sub chi.Router) {
+		ingest.RegisterRoutes(sub, st)
+		query.RegisterRoutes(sub, st)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	eventID := postDeployEvent(t, srv.URL, "deploy:staging", map[string]any{
+		"environment":  "staging",
+		"image_digest": "sha256:abc",
+	})
+
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519")
+	priv, pub, _ := attest.GenerateKey()
+	_ = attest.SaveKeyPair(keyPath, priv)
+
+	var buf bytes.Buffer
+	if err := exportDeployEvidence(
+		[]string{"--event", eventID, "--key", keyPath, "--url", srv.URL},
+		&buf,
+	); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	var env attest.Envelope
+	_ = json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &env)
+	payload, _, _ := attest.Verify(pub, &env)
+	var stmt attest.Statement
+	_ = json.Unmarshal(payload, &stmt)
+	var pred attest.DeployEvidence
+	_ = json.Unmarshal(stmt.Predicate, &pred)
+	if pred.Upstream.BuildAttestationDigest != "" || pred.Upstream.CodeAttestationDigest != "" {
+		t.Errorf("upstream digests should be empty without flags: %+v", pred.Upstream)
+	}
+}
+
+func TestExportDeployEvidenceRejectsNonDeployEvent(t *testing.T) {
+	st := store.NewMemory()
+	r := chi.NewRouter()
+	r.Route("/v1", func(sub chi.Router) {
+		ingest.RegisterRoutes(sub, st)
+		query.RegisterRoutes(sub, st)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	// Post a PROMPT event, then ask exportDeployEvidence to use its id —
+	// should fail because kind != DEPLOY.
+	body := `{"session_id":"s-not-deploy","actor":{"type":"human","id":"alice"},"kind":"prompt","payload":{"text":"hi"}}`
+	resp, err := http.Post(srv.URL+"/v1/events", "application/x-ndjson", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	gqlBody, _ := json.Marshal(map[string]any{
+		"query": `query { events(sessionId: "s-not-deploy", limit: 1) { id } }`,
+	})
+	resp2, err := http.Post(srv.URL+"/v1/graphql", "application/json", bytes.NewReader(gqlBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	var out struct {
+		Data struct {
+			Events []struct {
+				ID string `json:"id"`
+			} `json:"events"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(resp2.Body).Decode(&out)
+	if len(out.Data.Events) == 0 {
+		t.Fatal("event missing")
+	}
+
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519")
+	priv, _, _ := attest.GenerateKey()
+	_ = attest.SaveKeyPair(keyPath, priv)
+
+	var buf bytes.Buffer
+	err = exportDeployEvidence(
+		[]string{"--event", out.Data.Events[0].ID, "--key", keyPath, "--url", srv.URL},
+		&buf,
+	)
+	if err == nil {
+		t.Fatal("expected error for non-DEPLOY event")
+	}
+	if !strings.Contains(err.Error(), "DEPLOY") {
+		t.Errorf("error should mention DEPLOY: %v", err)
+	}
+}
+
+func TestExportDeployEvidenceMissingEventErrors(t *testing.T) {
+	st := store.NewMemory()
+	r := chi.NewRouter()
+	r.Route("/v1", func(sub chi.Router) {
+		ingest.RegisterRoutes(sub, st)
+		query.RegisterRoutes(sub, st)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519")
+	priv, _, _ := attest.GenerateKey()
+	_ = attest.SaveKeyPair(keyPath, priv)
+
+	var buf bytes.Buffer
+	err := exportDeployEvidence(
+		[]string{"--event", "01HNOSUCH", "--key", keyPath, "--url", srv.URL},
+		&buf,
+	)
+	if err == nil {
+		t.Fatal("expected error when event id is unknown")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should mention not found: %v", err)
+	}
+}
+
+func TestExportDeployEvidenceRequiresEventFlag(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519")
+	priv, _, _ := attest.GenerateKey()
+	_ = attest.SaveKeyPair(keyPath, priv)
+
+	var buf bytes.Buffer
+	if err := exportDeployEvidence([]string{"--key", keyPath}, &buf); err == nil {
+		t.Error("expected error when --event missing")
 	}
 }
 

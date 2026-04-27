@@ -129,6 +129,45 @@ agent-lens-hook export slsa-build \
 
 self-hosted runner 用 `--builder-id` 覆盖默认的 GitHub-hosted URI。
 
+### 导出 deploy-evidence（deploy 边界）
+
+deploy 事件本身已经在 `/webhooks/deploy` 落地（M3-A）；M3-B-4 这条命令把它升级为可签名的 in-toto attestation：
+
+```bash
+agent-lens-hook export deploy-evidence \
+  --event <deploy-event-id> \
+  --build-attestation slsa.intoto.jsonl \
+  --code-attestation code-prov.intoto.jsonl \
+  --out deploy.intoto.jsonl
+```
+
+- subject = 容器镜像（取 `image` 字段当 name、`image_digest` 当 sha256）。
+- predicate.environment / cluster / namespace / status 等都直接来自 deploy webhook payload。
+- `--build-attestation` / `--code-attestation` 都是可选；命令会对文件做 sha256 然后写到 `predicate.upstream.{build,code}_attestation`，供 verifier 顺着 deploy → build → code 走完证据图。不传就是空字符串，相当于明示"上游证据缺失"。
+- `predicate.trace_root_event_id` 默认就是 deploy event 自身的 id；查 store 时直接当入口。
+
+查事件 id 的两种方式：
+- POST `/webhooks/deploy` 时带 `Idempotency-Key: <ulid>`——这个 key 同时被服务器当成 event id 用，客户端预生成、自己留底。
+- 没设 `Idempotency-Key` 时只能事后用 GraphQL `events(sessionId: "deploy:<env>", limit: 10)` 查时间线（响应里的 `id` 字段）。
+
+## 校验 attestation
+
+```bash
+agent-lens-hook verify-attestation deploy.intoto.jsonl \
+  --pub ~/.agent-lens/keys/ed25519.pub \
+  --require-type agent-lens.dev/deploy-evidence/v1
+# OK · payloadType application/vnd.in-toto+json · predicateType agent-lens.dev/deploy-evidence/v1 · keyid <id>
+#   subject: ghcr.io/acme/widget (sha256:<digest>)
+```
+
+- exit 0：DSSE 签名通过，且（如果给了 `--require-type`）predicateType 一致。
+- exit 1：验证失败——签名错、predicateType 不匹配、envelope 解码失败。CI 网关里挂这个 exit code 就能阻断未签名的部署。
+- exit 2：用法 / 文件错（公钥读不到、文件不存在）。
+
+`--pub` 默认 `$HOME/.agent-lens/keys/ed25519.pub`。
+
+DSSE envelope 是标准格式，cosign / sigstore-go 都能识别——agent-lens 用同一份 ed25519 公钥（PEM/PKIX）签 + 验。把 `.intoto.jsonl` 的 payload (base64) 解出来再喂给第三方工具即可；后续若启用 Sigstore 网络模式（Fulcio + Rekor），`verify-attestation` 会扩展 `--rekor-url` 等 flag，envelope 格式不变。
+
 ## 校验哈希链
 
 ```bash
