@@ -17,6 +17,7 @@ import (
 	"github.com/dongqiu/agent-lens/internal/ingest"
 	"github.com/dongqiu/agent-lens/internal/query"
 	"github.com/dongqiu/agent-lens/internal/store"
+	githubwh "github.com/dongqiu/agent-lens/internal/webhooks/github"
 )
 
 func main() {
@@ -50,11 +51,24 @@ func main() {
 	if token == "" {
 		slog.Warn("AGENT_LENS_TOKEN is empty; /v1 endpoints are unauthenticated")
 	}
+
+	// One Handler, shared between the HTTP NDJSON path and any other
+	// in-process producers (e.g. webhook receivers) so the head-hash
+	// cache stays authoritative.
+	ingestH := ingest.NewHandler(st)
+
 	r.Route("/v1", func(sub chi.Router) {
 		sub.Use(auth.RequireToken(token))
-		ingest.RegisterRoutes(sub, st)
+		sub.Post("/events", ingestH.IngestNDJSON)
 		query.RegisterRoutes(sub, st)
 	})
+
+	if secret := os.Getenv("AGENT_LENS_GH_WEBHOOK_SECRET"); secret != "" {
+		r.Post("/webhooks/github", githubwh.NewHandler(secret, ingestH).ServeHTTP)
+		slog.Info("github webhook enabled", "path", "/webhooks/github")
+	} else {
+		slog.Info("AGENT_LENS_GH_WEBHOOK_SECRET unset; /webhooks/github not registered")
+	}
 
 	srv := &http.Server{
 		Addr:              addr,
