@@ -81,6 +81,27 @@ make web-build         # TS 类型检查 + Vite 打包
 
 Stop hook 会读 `transcript_path` 提取 `thinking` / `text` content blocks（仅当本轮启用 extended thinking 时有 thinking）。HTTP 失败时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink。
 
+## Attestation 签名密钥（M3-B-1）
+
+为后续导出 in-toto / SLSA attestation 准备本地 ed25519 密钥：
+
+```bash
+agent-lens-hook keygen
+# 默认写到 $HOME/.agent-lens/keys/ed25519 (私钥, 0600) + .pub (公钥, 0644)
+# PEM-encoded (PKCS#8 / PKIX)，cosign 和 openssl 都能读
+```
+
+`--out <path>` 可改路径。**拒绝覆盖已有文件**——轮换密钥写到新路径，避免在生产管道里悄悄抹掉私钥。
+
+`internal/attest` 包提供 `Sign` / `Verify` 走 DSSE envelope（`https://github.com/secure-systems-lab/dsse`），ed25519 走 stdlib。Sigstore（Fulcio + Rekor）网络签名作为后续可选项，与现有 API 同接口、按 flag 切换；M3-B-1 只做离线密钥这条腿。
+
+预算用法：
+- `agent-lens-hook export code-provenance` → in-toto Statement，predicateType `agent-lens.dev/code-provenance/v1`
+- `agent-lens-hook export slsa-build` → 标准 SLSA Build Track v1
+- `agent-lens-hook export deploy-evidence` → predicateType `agent-lens.dev/deploy-evidence/v1`
+
+每条命令产出一个 DSSE 信封 `.intoto.jsonl`，cosign 兼容。Predicate 里只放 thinking / prompt 的 sha256 + 200 字预览 + token 数；全文留 agent-lens 存储里——签了就难撤回，敏感内容上链得万分谨慎。
+
 ## 校验哈希链
 
 ```bash
