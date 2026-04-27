@@ -1,0 +1,18 @@
+version: "2"
+
+linters:
+  settings:
+    errcheck:
+      # Closing io.Closer / *os.File and writing to ResponseWriter are
+      # the canonical "we know we're ignoring this" cases in Go. The
+      # remaining errcheck coverage still catches genuine ignored errors.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (net/http.ResponseWriter).Write
+  exclusions:
+    paths:
+      # Generated code: gqlgen and protoc emit these.
+      - internal/pb
+      - internal/query/generated\.go
+      - internal/query/models_gen\.go
