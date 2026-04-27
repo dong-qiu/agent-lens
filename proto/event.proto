@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package agentlens.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/dongqiu/agent-lens/internal/pb;pb";
+
+// Event is the canonical record for one observable action in the human-agent
+// coding pipeline. Events are append-only and form a hash chain via prev_hash.
+message Event {
+  string id = 1;                              // ULID
+  google.protobuf.Timestamp ts = 2;
+  string session_id = 3;
+  string turn_id = 4;
+  Actor actor = 5;
+  EventKind kind = 6;
+  google.protobuf.Struct payload = 7;         // kind-specific
+  repeated string parents = 8;                // causal upstream event IDs
+  repeated string refs = 9;                   // referenced artifact IDs
+  string hash = 10;                           // hash(serialized event - hash - sig)
+  string prev_hash = 11;                      // hash of previous event in chain
+  bytes sig = 12;                             // optional ed25519 signature
+}
+
+message Actor {
+  ActorType type = 1;
+  string id = 2;
+  string model = 3;                           // populated when type=AGENT
+}
+
+enum ActorType {
+  ACTOR_TYPE_UNSPECIFIED = 0;
+  ACTOR_TYPE_HUMAN = 1;
+  ACTOR_TYPE_AGENT = 2;
+  ACTOR_TYPE_SYSTEM = 3;
+}
+
+enum EventKind {
+  EVENT_KIND_UNSPECIFIED = 0;
+  EVENT_KIND_PROMPT = 1;
+  EVENT_KIND_THOUGHT = 2;
+  EVENT_KIND_TOOL_CALL = 3;
+  EVENT_KIND_TOOL_RESULT = 4;
+  EVENT_KIND_CODE_CHANGE = 5;
+  EVENT_KIND_COMMIT = 6;
+  EVENT_KIND_PR = 7;
+  EVENT_KIND_TEST_RUN = 8;
+  EVENT_KIND_BUILD = 9;
+  EVENT_KIND_DEPLOY = 10;
+  EVENT_KIND_REVIEW = 11;
+  EVENT_KIND_DECISION = 12;
+}

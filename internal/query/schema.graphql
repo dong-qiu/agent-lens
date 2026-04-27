@@ -1,0 +1,54 @@
+scalar Time
+scalar JSON
+
+type Event {
+  id: ID!
+  ts: Time!
+  sessionId: String!
+  turnId: String
+  actor: Actor!
+  kind: EventKind!
+  payload: JSON
+  parents: [ID!]!
+  refs: [ID!]!
+  hash: String!
+  prevHash: String
+}
+
+type Actor {
+  type: ActorType!
+  id: String!
+  model: String
+}
+
+enum ActorType {
+  HUMAN
+  AGENT
+  SYSTEM
+}
+
+enum EventKind {
+  PROMPT
+  THOUGHT
+  TOOL_CALL
+  TOOL_RESULT
+  CODE_CHANGE
+  COMMIT
+  PR
+  TEST_RUN
+  BUILD
+  DEPLOY
+  REVIEW
+  DECISION
+}
+
+type Query {
+  """Look up a single event by ID."""
+  event(id: ID!): Event
+
+  """List events in append order for a session, up to limit."""
+  events(sessionId: String!, limit: Int = 100): [Event!]!
+
+  """Hash of the latest event in a session, or empty string if unknown."""
+  sessionHead(sessionId: String!): String!
+}
