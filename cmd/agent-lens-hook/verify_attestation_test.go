@@ -75,7 +75,7 @@ func TestVerifyAttestationHappyPath(t *testing.T) {
 		t.Errorf("output missing predicateType: %q", got)
 	}
 	if !strings.Contains(got, "subject: test (sha256:abc123)") {
-		t.Errorf("output missing subject: %q", got)
+		t.Errorf("output missing subject (single algo): %q", got)
 	}
 }
 

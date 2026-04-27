@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/dongqiu/agent-lens/internal/attest"
 )
@@ -32,9 +35,9 @@ mismatch, malformed envelope), 2 usage / file errors.
 func runVerifyAttestation(args []string) {
 	if err := verifyAttestationCore(args, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "agent-lens-hook verify-attestation: %v\n", err)
-		// Distinguish usage / file errors (exit 2) from verification
-		// errors (exit 1). The core wraps verification failures with
-		// the sentinel string "verify:" so the caller can tell.
+		// Verification errors exit 1 (caller can gate on it); usage /
+		// file errors exit 2 so a CD pipeline doesn't confuse "we
+		// couldn't even check" with "we checked and it's bad".
 		if isVerifyFailure(err) {
 			os.Exit(1)
 		}
@@ -51,20 +54,8 @@ func (v *verifyFailure) Error() string { return v.err.Error() }
 func (v *verifyFailure) Unwrap() error { return v.err }
 
 func isVerifyFailure(err error) bool {
-	for ; err != nil; err = unwrap(err) {
-		if _, ok := err.(*verifyFailure); ok {
-			return true
-		}
-	}
-	return false
-}
-
-func unwrap(err error) error {
-	type unwrapper interface{ Unwrap() error }
-	if u, ok := err.(unwrapper); ok {
-		return u.Unwrap()
-	}
-	return nil
+	var vf *verifyFailure
+	return errors.As(err, &vf)
 }
 
 func verifyAttestationCore(args []string, out io.Writer) error {
@@ -124,16 +115,24 @@ func verifyAttestationCore(args []string, out io.Writer) error {
 
 	subjects := make([]string, 0, len(stmt.Subject))
 	for _, s := range stmt.Subject {
-		// Subject digest is a single map; pick whichever algo first.
-		var algo, hex string
-		for a, h := range s.Digest {
-			algo, hex = a, h
-			break
+		// in-toto Subject.Digest is `map[algo]hex`; sort algos so the
+		// output is stable across runs (Go map iteration is random).
+		// Sorted alphabetically because there's no canonical priority
+		// in the spec — sha256 happens to come before sha512.
+		algos := make([]string, 0, len(s.Digest))
+		for a := range s.Digest {
+			algos = append(algos, a)
 		}
+		sort.Strings(algos)
+		parts := make([]string, 0, len(algos))
+		for _, a := range algos {
+			parts = append(parts, fmt.Sprintf("%s:%s", a, s.Digest[a]))
+		}
+		joined := strings.Join(parts, ",")
 		if s.Name != "" {
-			subjects = append(subjects, fmt.Sprintf("%s (%s:%s)", s.Name, algo, hex))
+			subjects = append(subjects, fmt.Sprintf("%s (%s)", s.Name, joined))
 		} else {
-			subjects = append(subjects, fmt.Sprintf("%s:%s", algo, hex))
+			subjects = append(subjects, joined)
 		}
 	}
 

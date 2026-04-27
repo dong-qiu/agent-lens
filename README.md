@@ -162,17 +162,9 @@ agent-lens-hook verify-attestation deploy.intoto.jsonl \
 - exit 1：验证失败——签名错、predicateType 不匹配、envelope 解码失败。CI 网关里挂这个 exit code 就能阻断未签名的部署。
 - exit 2：用法 / 文件错（公钥读不到、文件不存在）。
 
-`--pub` 默认 `$HOME/.agent-lens/keys/ed25519.pub`，多人多机环境里直接 `cosign verify-blob` 也能消费（DSSE 是标准 envelope，cosign 走的是同一份 ed25519 公钥）：
+`--pub` 默认 `$HOME/.agent-lens/keys/ed25519.pub`。
 
-```bash
-cosign verify-blob \
-  --key ~/.agent-lens/keys/ed25519.pub \
-  --signature <(jq -r '.signatures[0].sig' deploy.intoto.jsonl) \
-  --payload <(jq -r '.payload' deploy.intoto.jsonl | base64 -d) \
-  /dev/null
-```
-
-> cosign 的 `verify-blob` 不直接吃 DSSE envelope，所以要拆出 payload 和 sig 再喂；agent-lens 的 `verify-attestation` 直接吃 envelope，更省事。两条路出的结论应当一致。
+DSSE envelope 是标准格式，cosign / sigstore-go 都能识别——agent-lens 用同一份 ed25519 公钥（PEM/PKIX）签 + 验。把 `.intoto.jsonl` 的 payload (base64) 解出来再喂给第三方工具即可；后续若启用 Sigstore 网络模式（Fulcio + Rekor），`verify-attestation` 会扩展 `--rekor-url` 等 flag，envelope 格式不变。
 
 ## 校验哈希链
 
