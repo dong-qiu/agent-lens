@@ -34,7 +34,7 @@ func main() {
 		slog.Error("open store", "err", err)
 		os.Exit(1)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
