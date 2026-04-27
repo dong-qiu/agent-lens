@@ -102,6 +102,33 @@ agent-lens-hook keygen
 
 每条命令产出一个 DSSE 信封 `.intoto.jsonl`，cosign 兼容。Predicate 里只放 thinking / prompt 的 sha256 + 200 字预览 + token 数；全文留 agent-lens 存储里——签了就难撤回，敏感内容上链得万分谨慎。
 
+### 导出 code-provenance（commit 边界）
+
+```bash
+agent-lens-hook export code-provenance \
+  --commit <git-sha> \
+  --session <claude-session-id> \
+  --repo https://github.com/<owner>/<repo> \
+  --out attestation.intoto.jsonl
+```
+
+subject = git commit；predicate 列出贡献到此 commit 的 prompt / thought / tool_call 事件（每条带 sha256 + 200 字预览）。
+
+### 导出 SLSA build provenance（build 边界）
+
+标准 `https://slsa.dev/provenance/v1`，cosign / slsa-verifier 直接吃：
+
+```bash
+agent-lens-hook export slsa-build \
+  --session github-build:<owner>/<repo>/<run_id> \
+  --repo https://github.com/<owner>/<repo> \
+  --out slsa.intoto.jsonl
+```
+
+需要 session 里有 [composite Action](./actions/build/) 上报的 `kind=BUILD source=composite-action` 事件——它的 `payload.artifacts` 提供了 SLSA 强制的 subjects。`workflow_run` webhook 单独不够（没有 artifact hash）。
+
+self-hosted runner 用 `--builder-id` 覆盖默认的 GitHub-hosted URI。
+
 ## 校验哈希链
 
 ```bash

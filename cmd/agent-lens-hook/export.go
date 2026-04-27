@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/dongqiu/agent-lens/internal/attest"
@@ -23,7 +24,7 @@ Usage:
 
 Kinds:
   code-provenance   agent-lens.dev/code-provenance/v1 (commit boundary)
-  slsa-build        slsa.dev/provenance/v1 (build boundary; M3-B-3)
+  slsa-build        slsa.dev/provenance/v1 (build boundary)
   deploy-evidence   agent-lens.dev/deploy-evidence/v1 (deploy boundary; M3-B-4)
 `
 
@@ -42,8 +43,10 @@ func runExport(args []string) {
 			os.Exit(1)
 		}
 	case "slsa-build":
-		fmt.Fprintln(os.Stderr, "TODO: slsa-build (M3-B-3)")
-		os.Exit(1)
+		if err := exportSLSABuild(args[1:], os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "agent-lens-hook export slsa-build: %v\n", err)
+			os.Exit(1)
+		}
 	case "deploy-evidence":
 		fmt.Fprintln(os.Stderr, "TODO: deploy-evidence (M3-B-4)")
 		os.Exit(1)
@@ -267,7 +270,13 @@ func fetchProvenanceEvents(url, token, sessionID string, limit int, timeout time
 			Message string `json:"message"`
 		} `json:"errors"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	// UseNumber so payload numbers (e.g. workflow_run.id) decode as
+	// json.Number instead of float64. GitHub run ids are well under
+	// 2^53 today so the float path also works in practice, but
+	// json.Number is the forward-compatible idiom.
+	dec := json.NewDecoder(resp.Body)
+	dec.UseNumber()
+	if err := dec.Decode(&out); err != nil {
 		return nil, err
 	}
 	if len(out.Errors) > 0 {
@@ -330,4 +339,227 @@ func mapToProvenanceEvents(events []provenanceEvent) []attest.ProvenanceEvent {
 		out = append(out, pe)
 	}
 	return out
+}
+
+const slsaBuildUsage = `agent-lens-hook export slsa-build — sign a SLSA Build
+Track v1 provenance for a CI run.
+
+Usage:
+  agent-lens-hook export slsa-build \
+    --session <github-build-session-id> \
+    [--repo <url>] [--key <path>] [--out <file>] [--url <url>] [--token <token>]
+
+  --session  Build session id (required), typically
+             github-build:<owner>/<repo>/<run_id>. The session must
+             contain a composite-action build event (kind=BUILD with
+             payload.source="composite-action" and payload.artifacts);
+             that's where the artifact sha256s come from. SLSA spec
+             requires ≥1 subject so a session with only workflow_run
+             webhook events errors out.
+  --repo     repo URL (e.g. https://github.com/acme/widget); recorded
+             as the source resolvedDependency URI. Without --repo the
+             dep is digest-only.
+  --builder-id   override builder.id in runDetails (default GitHub-hosted
+             runner URI). Self-hosted runners or GHES installations
+             should pass their own URI here.
+  --key      ed25519 private key path
+             (default $HOME/.agent-lens/keys/ed25519)
+  --out      output file (default stdout)
+  --url      Agent Lens server URL
+             (default $AGENT_LENS_URL or http://localhost:8787)
+  --token    bearer token (default $AGENT_LENS_TOKEN)
+  --limit    max events to fetch (default 5000)
+  --timeout  HTTP timeout (default 30s)
+
+Output is one DSSE-wrapped in-toto Statement with predicateType
+"https://slsa.dev/provenance/v1", suitable for cosign / slsa-verifier.
+`
+
+func exportSLSABuild(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("export slsa-build", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var (
+		session     = fs.String("session", "", "github-build session id (required)")
+		repoFlag    = fs.String("repo", "", "repo URL recorded as the source resolvedDependency URI")
+		builderID   = fs.String("builder-id", attest.SLSABuilderID, "override builder.id (e.g. self-hosted runner URI)")
+		keyPath     = fs.String("key", "", "ed25519 private key path")
+		outPath     = fs.String("out", "", "output file (default stdout)")
+		urlFlag     = fs.String("url", "", "server URL")
+		tokenFlag   = fs.String("token", "", "bearer token")
+		limit       = fs.Int("limit", 5000, "max events to fetch")
+		timeout     = fs.Duration("timeout", 30*time.Second, "HTTP timeout")
+	)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, slsaBuildUsage) }
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *session == "" {
+		fs.Usage()
+		return fmt.Errorf("--session is required")
+	}
+
+	kp := *keyPath
+	if kp == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("home dir: %w", err)
+		}
+		kp = filepath.Join(home, ".agent-lens", "keys", "ed25519")
+	}
+	priv, err := attest.LoadPrivateKey(kp)
+	if err != nil {
+		return fmt.Errorf("load private key from %s: %w", kp, err)
+	}
+
+	url := chooseURL(*urlFlag)
+	token := chooseToken(*tokenFlag)
+	events, err := fetchProvenanceEvents(url, token, *session, *limit, *timeout)
+	if err != nil {
+		return fmt.Errorf("fetch session events: %w", err)
+	}
+	if len(events) == 0 {
+		return fmt.Errorf("session %q has no events", *session)
+	}
+	if *limit > 0 && len(events) >= *limit {
+		return fmt.Errorf("session %q hit the --limit cap (%d events); rerun with --limit larger", *session, *limit)
+	}
+
+	in, err := buildSLSAInputsFromEvents(events, *repoFlag)
+	if err != nil {
+		return err
+	}
+	in.BuilderID = *builderID
+
+	stmt, err := attest.BuildSLSAProvenanceStatement(in)
+	if err != nil {
+		return fmt.Errorf("build statement: %w", err)
+	}
+	stmtBytes, err := json.Marshal(stmt)
+	if err != nil {
+		return fmt.Errorf("marshal statement: %w", err)
+	}
+	env, err := attest.Sign(priv, attest.InTotoPayloadType, stmtBytes)
+	if err != nil {
+		return fmt.Errorf("sign: %w", err)
+	}
+	envBytes, err := json.Marshal(env)
+	if err != nil {
+		return fmt.Errorf("marshal envelope: %w", err)
+	}
+	envBytes = append(envBytes, '\n')
+
+	if *outPath != "" {
+		if err := os.WriteFile(*outPath, envBytes, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", *outPath, err)
+		}
+	} else if _, err := out.Write(envBytes); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr,
+		"slsa-build attestation written: %d subjects, %d bytes, key id %s\n",
+		len(in.Subjects), len(envBytes), priv.KeyID,
+	)
+	return nil
+}
+
+// buildSLSAInputsFromEvents walks BUILD events in the session and
+// pulls out (a) the artifact subjects from the composite-action event
+// and (b) builder/metadata fields preferring composite-action values
+// over workflow_run, falling back to whatever the workflow_run webhook
+// recorded. Errors when no composite-action artifacts are found —
+// SLSA spec needs ≥1 subject.
+func buildSLSAInputsFromEvents(events []provenanceEvent, repo string) (attest.SLSABuildInputs, error) {
+	var in attest.SLSABuildInputs
+	in.Repo = repo
+
+	for _, e := range events {
+		if e.Kind != "BUILD" || e.Payload == nil {
+			continue
+		}
+		if src, _ := e.Payload["source"].(string); src == "composite-action" {
+			// Composite-action: flat fields, has artifacts
+			if arts, ok := e.Payload["artifacts"].([]any); ok {
+				for _, a := range arts {
+					am, _ := a.(map[string]any)
+					path, _ := am["path"].(string)
+					sha, _ := am["sha256"].(string)
+					if path != "" && sha != "" {
+						in.Subjects = append(in.Subjects, attest.Subject{
+							Name:   path,
+							Digest: map[string]string{"sha256": sha},
+						})
+					}
+				}
+			}
+			if v, _ := e.Payload["workflow"].(string); v != "" {
+				in.WorkflowName = v
+			}
+			if v, _ := e.Payload["run_id"].(string); v != "" {
+				in.RunID = v
+			}
+			if v, _ := e.Payload["run_number"].(string); v != "" {
+				in.RunNumber = v
+			}
+			if v, _ := e.Payload["run_attempt"].(string); v != "" {
+				in.RunAttempt = v
+			}
+			if v, _ := e.Payload["ref"].(string); v != "" {
+				in.Ref = v
+			}
+			if v, _ := e.Payload["sha"].(string); v != "" {
+				in.CommitSHA = v
+			}
+			if v, _ := e.Payload["status"].(string); v != "" {
+				in.Conclusion = v
+			}
+			continue
+		}
+		// Otherwise treat as workflow_run webhook payload (nested
+		// `workflow_run` object). Fields here only fill in what the
+		// composite-action event left blank.
+		wr, _ := e.Payload["workflow_run"].(map[string]any)
+		if wr == nil {
+			continue
+		}
+		if in.WorkflowName == "" {
+			in.WorkflowName, _ = wr["name"].(string)
+		}
+		if in.RunID == "" {
+			// Accept whichever JSON-decoder type carries the number.
+			// UseNumber gives json.Number; default decoder gives
+			// float64; a webhook payload could even hand us the run
+			// id pre-stringified.
+			switch v := wr["id"].(type) {
+			case json.Number:
+				in.RunID = string(v)
+			case float64:
+				in.RunID = strconv.FormatInt(int64(v), 10)
+			case string:
+				in.RunID = v
+			}
+		}
+		if in.CommitSHA == "" {
+			in.CommitSHA, _ = wr["head_sha"].(string)
+		}
+		if in.Ref == "" {
+			if v, ok := wr["head_branch"].(string); ok && v != "" {
+				in.Ref = "refs/heads/" + v
+			}
+		}
+		if in.StartedOn == "" {
+			in.StartedOn, _ = wr["run_started_at"].(string)
+		}
+		if in.FinishedOn == "" {
+			in.FinishedOn, _ = wr["updated_at"].(string)
+		}
+		if in.Conclusion == "" {
+			in.Conclusion, _ = wr["conclusion"].(string)
+		}
+	}
+
+	if len(in.Subjects) == 0 {
+		return in, fmt.Errorf("session has no composite-action build event with artifacts; SLSA build provenance needs ≥1 subject. Run the agent-lens/actions/build action in your workflow to record artifact hashes")
+	}
+	return in, nil
 }
