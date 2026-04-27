@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package agentlens.v1;
+
+option go_package = "github.com/dongqiu/agent-lens/internal/pb;pb";
+
+// Link expresses a causal or semantic relation between two events.
+// Stored separately from events so linking can be re-derived without
+// rewriting the append-only event log.
+message Link {
+  string from_event = 1;
+  string to_event = 2;
+  Relation relation = 3;
+  float confidence = 4;                       // 0.0 .. 1.0
+  string inferred_by = 5;                     // rule id, or "manual"
+}
+
+enum Relation {
+  RELATION_UNSPECIFIED = 0;
+  RELATION_PRODUCES = 1;
+  RELATION_REFERENCES = 2;
+  RELATION_REVIEWS = 3;
+  RELATION_BUILDS = 4;
+  RELATION_DEPLOYS = 5;
+}

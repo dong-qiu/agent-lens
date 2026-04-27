@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package agentlens.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/dongqiu/agent-lens/internal/pb;pb";
+
+// Artifact is content-addressed by id (sha256 of blob_ref content).
+message Artifact {
+  string id = 1;                              // sha256
+  ArtifactType type = 2;
+  google.protobuf.Struct meta = 3;
+  string blob_ref = 4;                        // s3://bucket/key or local path
+}
+
+enum ArtifactType {
+  ARTIFACT_TYPE_UNSPECIFIED = 0;
+  ARTIFACT_TYPE_BLOB = 1;
+  ARTIFACT_TYPE_COMMIT = 2;
+  ARTIFACT_TYPE_PR = 3;
+  ARTIFACT_TYPE_IMAGE = 4;
+  ARTIFACT_TYPE_TEST_REPORT = 5;
+  ARTIFACT_TYPE_BUILD_LOG = 6;
+  ARTIFACT_TYPE_DEPLOY_RECORD = 7;
+}

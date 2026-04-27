@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agentlens
+      POSTGRES_PASSWORD: agentlens
+      POSTGRES_DB: agentlens
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./.data/pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentlens"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: agentlens
+      MINIO_ROOT_PASSWORD: agentlens-secret
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # console
+    volumes:
+      - ./.data/minio:/data
+
+  agent-lens:
+    build:
+      context: ../../
+      dockerfile: deploy/compose/Dockerfile.server
+    environment:
+      AGENT_LENS_ADDR: ":8787"
+      AGENT_LENS_PG_DSN: "postgres://agentlens:agentlens@postgres:5432/agentlens?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8787:8787"

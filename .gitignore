@@ -1,0 +1,30 @@
+# Build outputs
+/bin/
+/dist/
+*.exe
+
+# Go
+*.test
+*.out
+coverage.txt
+vendor/
+
+# Frontend
+web/node_modules/
+web/dist/
+web/.vite/
+*.tsbuildinfo
+
+# Env / local config
+.env
+.env.local
+*.local
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Compose state
+deploy/compose/.data/
