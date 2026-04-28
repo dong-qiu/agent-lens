@@ -51,10 +51,16 @@ export default function App() {
       : "M1 timeline"
     : "M2 sessions";
 
+  // Graph view needs more horizontal room (dagre lays a wide DAG; the
+  // minimap also looks cramped at 4xl). Timeline and SessionList were
+  // designed for 4xl and look stretched at wider widths, so the
+  // wrapper width is per-view.
+  const wrapperMaxW = sessionId && view === "graph" ? "max-w-6xl" : "max-w-4xl";
+
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
       <header className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+        <div className={`mx-auto flex ${wrapperMaxW} items-center justify-between px-6 py-4`}>
           <div className="flex items-baseline gap-3">
             <button
               type="button"
@@ -82,7 +88,7 @@ export default function App() {
           )}
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-6 py-6">
+      <main className={`mx-auto ${wrapperMaxW} px-6 py-6`}>
         {sessionId ? (
           view === "graph" ? (
             <CausalGraph sessionId={sessionId} />
