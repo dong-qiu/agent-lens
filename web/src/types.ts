@@ -49,6 +49,10 @@ export type EventsResponse = {
   sessionHead: string;
 };
 
+export type LinkedEventsResponse = {
+  linkedEvents: Event[];
+};
+
 export type Session = {
   id: string;
   firstEventAt: string;

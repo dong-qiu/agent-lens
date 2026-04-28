@@ -8,6 +8,7 @@ package query
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/dongqiu/agent-lens/internal/store"
@@ -80,6 +81,98 @@ func (r *queryResolver) Sessions(ctx context.Context, limit *int, since *time.Ti
 	out := make([]*Session, 0, len(list))
 	for _, s := range list {
 		out = append(out, toGQLSession(s))
+	}
+	return out, nil
+}
+
+// LinkedEvents is the resolver for the linkedEvents field.
+//
+// BFS by session: start from sessionID, list its events, then expand
+// to any session reachable via links, repeating up to `depth` hops.
+//
+// Critical: link discovery uses Store.LinksForSession (full table
+// scan filtered by session) rather than walking links per fetched
+// event. The latter would cap discovery at perSessionLimit events,
+// silently missing links that live on events past that cap — exactly
+// what the dogfood data hit (the link-bearing tool_result was past
+// row 900 of a 1000-event session).
+func (r *queryResolver) LinkedEvents(ctx context.Context, sessionID string, depth *int, perSessionLimit *int) ([]*Event, error) {
+	d := 1
+	if depth != nil {
+		d = *depth
+	}
+	if d < 0 {
+		d = 0
+	}
+	if d > 3 {
+		d = 3
+	}
+
+	psl := 200
+	if perSessionLimit != nil {
+		psl = *perSessionLimit
+	}
+
+	visited := map[string]bool{sessionID: true}
+	frontier := []string{sessionID}
+	var collected []*store.Event
+
+	collectedIDs := map[string]bool{}
+	for level := 0; level <= d && len(frontier) > 0; level++ {
+		var nextFrontier []string
+		for _, sid := range frontier {
+			evs, err := r.Store.ListBySession(ctx, sid, psl)
+			if err != nil {
+				return nil, fmt.Errorf("ListBySession(%q): %w", sid, err)
+			}
+			for _, e := range evs {
+				if !collectedIDs[e.ID] {
+					collectedIDs[e.ID] = true
+					collected = append(collected, e)
+				}
+			}
+
+			// Always pull the links touching this session so we (a) can
+			// expand the frontier and (b) can guarantee link-bearing
+			// events from this session are present in the result even
+			// when they sit past `psl`. Without that guarantee, a
+			// cross-session edge whose anchor-side endpoint was paged
+			// out would render as an orphan and ReactFlow would
+			// silently drop it — the user sees neighbouring events
+			// floating with no visible connection back.
+			links, err := r.Store.LinksForSession(ctx, sid)
+			if err != nil {
+				// Tolerate per-session link lookup failures — they'd
+				// only suppress neighbour discovery, not corrupt the
+				// already-collected events.
+				continue
+			}
+			for _, l := range links {
+				for _, otherID := range [2]string{l.FromEvent, l.ToEvent} {
+					other, err := r.Store.GetEvent(ctx, otherID)
+					if err != nil || other == nil {
+						continue
+					}
+					// Patch in this-session link endpoints that fell
+					// past psl, so cross-session edges always have
+					// both endpoints in the rendered set.
+					if other.SessionID == sid && !collectedIDs[other.ID] {
+						collectedIDs[other.ID] = true
+						collected = append(collected, other)
+					}
+					if level < d && !visited[other.SessionID] {
+						visited[other.SessionID] = true
+						nextFrontier = append(nextFrontier, other.SessionID)
+					}
+				}
+			}
+		}
+		frontier = nextFrontier
+	}
+
+	out := make([]*Event, 0, len(collected))
+	for _, se := range collected {
+		out = append(out, toGQLEvent(se))
 	}
 	return out, nil
 }

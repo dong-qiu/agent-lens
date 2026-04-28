@@ -67,10 +67,11 @@ type ComplexityRoot struct {
 	}
 
 	Query struct {
-		Event       func(childComplexity int, id string) int
-		Events      func(childComplexity int, sessionID string, limit *int) int
-		SessionHead func(childComplexity int, sessionID string) int
-		Sessions    func(childComplexity int, limit *int, since *time.Time) int
+		Event        func(childComplexity int, id string) int
+		Events       func(childComplexity int, sessionID string, limit *int) int
+		LinkedEvents func(childComplexity int, sessionID string, depth *int, perSessionLimit *int) int
+		SessionHead  func(childComplexity int, sessionID string) int
+		Sessions     func(childComplexity int, limit *int, since *time.Time) int
 	}
 
 	Session struct {
@@ -89,6 +90,7 @@ type QueryResolver interface {
 	Events(ctx context.Context, sessionID string, limit *int) ([]*Event, error)
 	SessionHead(ctx context.Context, sessionID string) (string, error)
 	Sessions(ctx context.Context, limit *int, since *time.Time) ([]*Session, error)
+	LinkedEvents(ctx context.Context, sessionID string, depth *int, perSessionLimit *int) ([]*Event, error)
 }
 
 type executableSchema graphql.ExecutableSchemaState[ResolverRoot, DirectiveRoot, ComplexityRoot]
@@ -251,6 +253,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.Query.Events(childComplexity, args["sessionId"].(string), args["limit"].(*int)), true
 
+	case "Query.linkedEvents":
+		if e.ComplexityRoot.Query.LinkedEvents == nil {
+			break
+		}
+
+		args, err := ec.field_Query_linkedEvents_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Query.LinkedEvents(childComplexity, args["sessionId"].(string), args["depth"].(*int), args["perSessionLimit"].(*int)), true
 	case "Query.sessionHead":
 		if e.ComplexityRoot.Query.SessionHead == nil {
 			break
@@ -620,6 +633,36 @@ func (ec *executionContext) field_Query_events_args(ctx context.Context, rawArgs
 		return nil, err
 	}
 	args["limit"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_linkedEvents_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "sessionId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["sessionId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "depth",
+		func(ctx context.Context, v any) (*int, error) {
+			return ec.unmarshalOInt2ᚖint(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["depth"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "perSessionLimit",
+		func(ctx context.Context, v any) (*int, error) {
+			return ec.unmarshalOInt2ᚖint(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["perSessionLimit"] = arg2
 	return args, nil
 }
 
@@ -1371,6 +1414,50 @@ func (ec *executionContext) fieldContext_Query_sessions(ctx context.Context, fie
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_sessions_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_linkedEvents(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Query_linkedEvents(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Query().LinkedEvents(ctx, fc.Args["sessionId"].(string), fc.Args["depth"].(*int), fc.Args["perSessionLimit"].(*int))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*Event) graphql.Marshaler {
+			return ec.marshalNEvent2ᚕᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐEventᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Query_linkedEvents(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_Event(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_linkedEvents_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -2925,6 +3012,28 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_sessions(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "linkedEvents":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_linkedEvents(ctx, field)
 				if res == graphql.Null {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
