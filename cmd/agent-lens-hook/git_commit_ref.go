@@ -85,7 +85,10 @@ func looksLikeGitCommit(cmd string) bool {
 		for i < len(f) && (strings.Contains(f[i], "=") || isCommandPrefix(f[i])) {
 			i++
 		}
-		if i+1 < len(f) && strings.HasSuffix(f[i], "git") && f[i+1] == "commit" {
+		// Match the literal `git` or any `…/git` (absolute path,
+		// relative `./bin/git`). HasSuffix(_, "git") would have
+		// false-positived `not-git`, `mygit`, etc.
+		if i+1 < len(f) && (f[i] == "git" || strings.HasSuffix(f[i], "/git")) && f[i+1] == "commit" {
 			return true
 		}
 	}

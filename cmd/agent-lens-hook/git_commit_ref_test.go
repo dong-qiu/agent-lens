@@ -29,6 +29,9 @@ func TestLooksLikeGitCommit(t *testing.T) {
 		{"git status", false, "different subcommand"},
 		{"git commit-tree", false, "different subcommand starting with commit"},
 		{"./bin/agentcommit -m foo", false, "unrelated tool with substring"},
+		{"not-git commit -m foo", false, "tool ending in 'git' is not git"},
+		{"mygit commit -m foo", false, "another tool ending in 'git'"},
+		{"./bin/git commit -m foo", true, "relative ./bin/git path"},
 		{"", false, "empty"},
 	}
 	for _, c := range cases {
