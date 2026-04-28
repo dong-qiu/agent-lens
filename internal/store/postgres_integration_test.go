@@ -217,6 +217,98 @@ func openPostgresWithSchema(ctx context.Context, t *testing.T) (*Postgres, func(
 	}
 }
 
+// TestStoreReadOrderParity is the regression test for issue #38: under
+// skewed wall-clock timestamps (concurrent hooks fire at the same
+// millisecond and stamp ts on their own clocks), Memory and Postgres
+// must agree on ListBySession order — namely the append/ULID order, not
+// ts order — so the hash chain walks consistently across stores.
+//
+// Runs against both backends in one test so any future divergence shows
+// up here.
+func TestStoreReadOrderParity(t *testing.T) {
+	ctx := context.Background()
+	pg, cleanup := openPostgresWithSchema(ctx, t)
+	defer cleanup()
+	mem := NewMemory()
+
+	// Three events appended in id-monotonic order (e1 < e2 < e3) but
+	// with deliberately skewed ts: the last one carries the *earliest*
+	// timestamp, mimicking a hook with a slow clock that nevertheless
+	// reaches the collector last.
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	events := []*Event{
+		{ID: "01HSKEW0000000000000000001", TS: t0.Add(2 * time.Second), SessionID: "skew", ActorType: "human", ActorID: "alice", Kind: "prompt", Hash: "h1"},
+		{ID: "01HSKEW0000000000000000002", TS: t0.Add(3 * time.Second), SessionID: "skew", ActorType: "agent", ActorID: "claude", Kind: "thought", Hash: "h2", PrevHash: "h1"},
+		{ID: "01HSKEW0000000000000000003", TS: t0.Add(1 * time.Second), SessionID: "skew", ActorType: "agent", ActorID: "claude", Kind: "tool_call", Hash: "h3", PrevHash: "h2"},
+	}
+	for _, e := range events {
+		if err := pg.AppendEvent(ctx, e); err != nil {
+			t.Fatalf("pg append %s: %v", e.ID, err)
+		}
+		if err := mem.AppendEvent(ctx, e); err != nil {
+			t.Fatalf("mem append %s: %v", e.ID, err)
+		}
+	}
+
+	pgList, err := pg.ListBySession(ctx, "skew", 0)
+	if err != nil {
+		t.Fatalf("pg list: %v", err)
+	}
+	memList, err := mem.ListBySession(ctx, "skew", 0)
+	if err != nil {
+		t.Fatalf("mem list: %v", err)
+	}
+
+	wantIDs := []string{events[0].ID, events[1].ID, events[2].ID}
+	gotPGIDs := make([]string, len(pgList))
+	for i, e := range pgList {
+		gotPGIDs[i] = e.ID
+	}
+	gotMemIDs := make([]string, len(memList))
+	for i, e := range memList {
+		gotMemIDs[i] = e.ID
+	}
+	if !equalStrings(gotPGIDs, wantIDs) {
+		t.Errorf("pg list ids = %v, want %v (append order)", gotPGIDs, wantIDs)
+	}
+	if !equalStrings(gotMemIDs, wantIDs) {
+		t.Errorf("mem list ids = %v, want %v (append order)", gotMemIDs, wantIDs)
+	}
+
+	// Hash chain walks correctly under this order.
+	for i := 1; i < len(pgList); i++ {
+		if pgList[i].PrevHash != pgList[i-1].Hash {
+			t.Errorf("pg chain break at %d: prev=%q want %q", i, pgList[i].PrevHash, pgList[i-1].Hash)
+		}
+	}
+
+	// Both stores agree on head: the last-appended event (h3), even
+	// though its ts is the earliest of the three.
+	pgHead, err := pg.HeadHash(ctx, "skew")
+	if err != nil {
+		t.Fatalf("pg head: %v", err)
+	}
+	memHead, err := mem.HeadHash(ctx, "skew")
+	if err != nil {
+		t.Fatalf("mem head: %v", err)
+	}
+	if pgHead != "h3" || memHead != "h3" {
+		t.Errorf("head: pg=%q mem=%q, want h3 from both (last-appended wins)", pgHead, memHead)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestPostgresListSessions checks that ListSessions aggregates events
 // correctly and matches the Memory implementation's ordering: most
 // recently active session first, with eventCount and first/last

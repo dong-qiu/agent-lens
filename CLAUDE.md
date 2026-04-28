@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Agent Lens is in the **planning phase**. There is no source code, build system, or test suite yet — only `SPEC.md`, the project specification. Future work will scaffold the implementation based on that spec.
+M1–M3 have shipped: Claude Code hook → ingest → store → GraphQL → Lens UI is working end-to-end, with linking, in-toto/SLSA attestation, hash-chain `verify`, and audit-report export. §17 dogfood activation is live, so this repo is its own first dogfood. M2 session list (sessions GraphQL + UI list page) merged on 2026-04-28. See `SPEC.md` §14 for the milestone breakdown.
 
 ## What this project is
 
@@ -27,4 +27,27 @@ These were settled during initial scoping and are referenced throughout `SPEC.md
 ## Working in this repo
 
 - Treat `SPEC.md` as the source of truth for design. If a request conflicts with it, surface the conflict and ask before changing the spec.
-- No build / test / lint commands exist yet — don't fabricate them. The repo layout in `SPEC.md` §16.3 is the planned structure but nothing has been scaffolded.
+- Common commands are wired in the `Makefile`: `make build`, `make proto`, `make gqlgen`, `make test`, `make test-integration`, `make migrate-up`, `make compose-up`, `make web-dev`, `make web-build`. `make help` lists them all.
+
+## Local development with persistence
+
+The collector defaults to `AGENT_LENS_STORE=postgres`. To run the dogfood loop with data that survives restarts:
+
+```bash
+# 1. Start Postgres + MinIO (only the services we actually use locally;
+#    the agent-lens compose service is for production-style runs and
+#    its Dockerfile lags behind go.mod, so skip it).
+docker compose -f deploy/compose/docker-compose.yml up -d postgres minio
+
+# 2. Apply migrations (requires `golang-migrate`; `brew install golang-migrate`).
+make migrate-up
+
+# 3. Run the collector. With no AGENT_LENS_STORE override it talks to
+#    localhost:5432 using the default DSN baked into main.go.
+go run ./cmd/agent-lens
+
+# 4. Optional: Vite dev server proxies /v1 to 8787.
+make web-dev
+```
+
+Set `AGENT_LENS_STORE=memory` for an ephemeral run (used by integration tests and for one-off smoke loops). Set `AGENT_LENS_PG_DSN=...` to point at a non-default Postgres.

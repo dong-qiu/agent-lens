@@ -159,6 +159,17 @@ func (h *Handler) appendLocked(ctx context.Context, in *WireEvent) error {
 	if err := validateWireEvent(in); err != nil {
 		return err
 	}
+
+	// ID assignment, ts default, and canonical marshal must happen under
+	// the same lock that orders the append. Otherwise, two concurrent
+	// goroutines can call ulid.Make() in one order and acquire h.mu in
+	// the other — the resulting ids no longer reflect append order, and
+	// the store's id-asc read order (see issue #38) drifts from the hash
+	// chain. Marshal is also moved inside because canonical includes the
+	// id; doing it outside before id assignment would race.
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	if in.ID == "" {
 		in.ID = ulid.Make().String()
 	}
@@ -169,9 +180,6 @@ func (h *Handler) appendLocked(ctx context.Context, in *WireEvent) error {
 	if err != nil {
 		return err
 	}
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	prev, hit := h.heads[in.SessionID]
 	if !hit {

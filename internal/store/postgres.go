@@ -75,9 +75,14 @@ func (p *Postgres) GetEvent(ctx context.Context, id string) (*Event, error) {
 }
 
 func (p *Postgres) ListBySession(ctx context.Context, sessionID string, limit int) ([]*Event, error) {
+	// id ASC, not ts ASC: ULIDs are monotonic at insert time, so id-order
+	// equals append-order. ts is set by the hook on its own wall clock, so
+	// concurrent hooks can produce events whose ts is earlier than an
+	// already-appended event's ts — sorting by ts then walks the hash chain
+	// in the wrong order. See issue #38.
 	const q = `SELECT id, ts, session_id, turn_id, actor_type, actor_id, actor_model,
 		kind, payload, parents, refs, hash, prev_hash, sig
-		FROM events WHERE session_id = $1 ORDER BY ts ASC LIMIT $2`
+		FROM events WHERE session_id = $1 ORDER BY id ASC LIMIT $2`
 	// limit <= 0 means "no limit"; PG would otherwise treat 0 literally.
 	if limit <= 0 {
 		limit = 1<<31 - 1
@@ -99,9 +104,11 @@ func (p *Postgres) ListBySession(ctx context.Context, sessionID string, limit in
 }
 
 func (p *Postgres) HeadHash(ctx context.Context, sessionID string) (string, error) {
-	// Tie-break on id (ULIDs are monotonic within ms) so same-timestamp
-	// events resolve to a deterministic head.
-	const q = `SELECT hash FROM events WHERE session_id = $1 ORDER BY ts DESC, id DESC LIMIT 1`
+	// "Latest" = last-inserted, identified by max id (ULIDs are monotonic
+	// at insert). ts is hook wall-clock and can be skewed across concurrent
+	// hooks, so ordering on ts would pick the wrong head on collector
+	// restart. See issue #38.
+	const q = `SELECT hash FROM events WHERE session_id = $1 ORDER BY id DESC LIMIT 1`
 	var h string
 	err := p.pool.QueryRow(ctx, q, sessionID).Scan(&h)
 	if errors.Is(err, pgx.ErrNoRows) {

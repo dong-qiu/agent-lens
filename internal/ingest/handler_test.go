@@ -225,6 +225,13 @@ func TestIngestConcurrentWritesPreserveChain(t *testing.T) {
 		if i > 0 && e.PrevHash != events[i-1].Hash {
 			t.Errorf("chain forked at index %d: prev=%q want %q", i, e.PrevHash, events[i-1].Hash)
 		}
+		// Issue #38: id-asc ordering must match append order, so that
+		// Postgres's ORDER BY id ASC reads back the same sequence
+		// Memory does. This holds only because handler.appendLocked
+		// generates the ulid inside h.mu — see the comment there.
+		if i > 0 && e.ID <= events[i-1].ID {
+			t.Errorf("ids not monotonic at index %d: %s after %s", i, e.ID, events[i-1].ID)
+		}
 	}
 }
 
