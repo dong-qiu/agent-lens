@@ -1,4 +1,4 @@
-.PHONY: help build proto lint test migrate-up migrate-down compose-up compose-down clean
+.PHONY: help build proto lint test migrate-up migrate-down compose-up compose-down db-backup db-restore db-verify-backup clean
 
 BIN_DIR := bin
 PG_DSN ?= postgres://agentlens:agentlens@localhost:5432/agentlens?sslmode=disable
@@ -35,6 +35,17 @@ migrate-up: ## Apply DB migrations
 
 migrate-down: ## Roll back last migration
 	migrate -path migrations -database "$(PG_DSN)" down 1
+
+db-backup: ## Dump events / links / artifacts to ./backups/agentlens-<ts>.dump
+	PG_DSN="$(PG_DSN)" scripts/pg-backup.sh
+
+db-restore: ## Restore from a dump (DUMP=path/to/file.dump required)
+	@if [ -z "$(DUMP)" ]; then echo "usage: make db-restore DUMP=backups/agentlens-...dump"; exit 2; fi
+	PG_DSN="$(PG_DSN)" scripts/pg-restore.sh "$(DUMP)"
+
+db-verify-backup: ## Round-trip backup + restore + hash-chain verify (SESSION=<id> required)
+	@if [ -z "$(SESSION)" ]; then echo "usage: make db-verify-backup SESSION=<session-id>"; exit 2; fi
+	PG_DSN="$(PG_DSN)" scripts/verify-backup-integrity.sh "$(SESSION)"
 
 compose-up: ## Start local Postgres + MinIO
 	docker compose -f deploy/compose/docker-compose.yml up -d
