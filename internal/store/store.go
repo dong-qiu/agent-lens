@@ -67,6 +67,11 @@ type Store interface {
 	AppendEvent(ctx context.Context, e *Event) error
 	GetEvent(ctx context.Context, id string) (*Event, error)
 	ListBySession(ctx context.Context, sessionID string, limit int) ([]*Event, error)
+	// EventsBeforeID returns events from sessionID with id strictly less
+	// than eventID, ordered by id ASC, capped at limit. Used to fetch
+	// chain-context windows around link-bearing events that fell past
+	// the per-session limit.
+	EventsBeforeID(ctx context.Context, sessionID, eventID string, limit int) ([]*Event, error)
 	HeadHash(ctx context.Context, sessionID string) (string, error)
 	EventsByRef(ctx context.Context, ref string) ([]*Event, error)
 	// ListSessions returns session summaries ordered by LastEventAt DESC.

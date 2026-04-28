@@ -242,36 +242,52 @@ export function CausalGraph({
   sessionId: string;
   linked: boolean;
 }) {
-  // The two queries share queryKey so React Query treats them as the
-  // same cache cell. Switching the toggle invalidates and refetches
-  // because we change queryFn under the same key — but for v1 we
-  // accept that (a single `events` query that always returned cross-
-  // session is server-side-cheaper but loses the "single-session
-  // anchor" semantic the URL conveys).
-  const { data, error, isLoading } = useQuery({
+  // CRITICAL: this hook MUST share its queryKey + queryFn shape with
+  // the Timeline view's hook so the react-query cache is consistent.
+  // Earlier we transformed via `.then((d) => d.events)` here, which
+  // wrote the un-transformed EventsResponse object into the cache
+  // (react-query keys on queryKey, not on what queryFn returns post-
+  // transform). Timeline reads the EventsResponse fine; this graph
+  // hook then read it back as `Event[]` and `for…of` threw on the
+  // object, blanking the React tree.
+  const { data, error, isLoading } = useQuery<
+    EventsResponse | LinkedEventsResponse
+  >({
     queryKey: linked ? ["linkedEvents", sessionId] : ["events", sessionId],
-    queryFn: () =>
-      linked
-        ? gql<LinkedEventsResponse>(linkedEventsQuery, {
+    queryFn: linked
+      ? () =>
+          gql<LinkedEventsResponse>(linkedEventsQuery, {
             sessionId,
             depth: 1,
             perSessionLimit: 200,
-          }).then((d): Event[] => d.linkedEvents)
-        : gql<EventsResponse>(eventsQuery, { sessionId, limit: 200 }).then(
-            (d): Event[] => d.events,
-          ),
+          })
+      : () => gql<EventsResponse>(eventsQuery, { sessionId, limit: 200 }),
     enabled: sessionId.length > 0,
-    refetchInterval: 2000,
+    // Audit / graph view doesn't need 2s polling like Timeline — every
+    // refetch reruns the dagre layout (O(N) on 200-300 nodes) which
+    // blocks the main thread enough to make Graph→Timeline toggling
+    // feel sticky. 15s is a reasonable freshness for an "investigate
+    // what already happened" view.
+    refetchInterval: 15_000,
   });
 
+  // Unify the two response shapes into a single Event[] for downstream
+  // graph building. Both Timeline and CausalGraph populate the same
+  // cache cell, so this stays consistent across view toggles.
+  const events: Event[] = useMemo(() => {
+    if (!data) return [];
+    if ("linkedEvents" in data) return data.linkedEvents;
+    return data.events;
+  }, [data]);
+
   const graph = useMemo(() => {
-    if (!data?.length) return { nodes: [], edges: [], crossSessionCount: 0 };
-    const built = buildGraph(data, sessionId);
-    const crossSessionCount = data.filter(
+    if (!events.length) return { nodes: [], edges: [], crossSessionCount: 0 };
+    const built = buildGraph(events, sessionId);
+    const crossSessionCount = events.filter(
       (e) => e.sessionId !== sessionId,
     ).length;
     return { ...built, crossSessionCount };
-  }, [data, sessionId]);
+  }, [events, sessionId]);
 
   if (isLoading) return <div className="text-sm text-zinc-500">Loading…</div>;
   if (error) {
@@ -295,7 +311,7 @@ export function CausalGraph({
     <div>
       {linked && (
         <div className="mb-2 text-xs text-zinc-600">
-          Showing {data.length} events across linked sessions
+          Showing {events.length} events across linked sessions
           {graph.crossSessionCount > 0 && (
             <>
               {" "}

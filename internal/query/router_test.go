@@ -529,3 +529,117 @@ func TestLinkedEventsResolver_LinkBearerPastLimit_PatchedIn(t *testing.T) {
 		t.Errorf("expected e-anchor-bearer (anchor's link-bearing event past perSessionLimit) to be patched into the result; got %d events: %v", len(got.Data.LinkedEvents), got.Data.LinkedEvents)
 	}
 }
+
+// TestLinkedEventsResolver_BearerChainContext is the regression for
+// the visual silent-degradation reported by the user: when the
+// link-bearing event in any session sits past perSessionLimit, the
+// bearer is patched in but its chain ancestors aren't, so the dashed
+// prev_hash edge into the bearer has source=non-rendered and
+// ReactFlow silently drops it — the bearer floats next to the peer
+// COMMIT with no chain connection back.
+//
+// Fix: for each patched-in bearer, also pull a small chain-context
+// window of predecessors via Store.EventsBeforeID. Seed session stays
+// bounded by perSessionLimit so the UI doesn't have to render
+// thousands of unrelated events when investigating a long session.
+func TestLinkedEventsResolver_BearerChainContext(t *testing.T) {
+	st := store.NewMemory()
+	ctx := context.Background()
+
+	// 50 anchor events, link-bearing TOOL_RESULT at index 50.
+	for i := 0; i < 50; i++ {
+		if err := st.AppendEvent(ctx, &store.Event{
+			ID: fmt.Sprintf("e-anchor-%03d", i), SessionID: "s-seed",
+			ActorType: "agent", ActorID: "claude-code",
+			Kind: "tool_call", Hash: fmt.Sprintf("h-anchor-%03d", i),
+			PrevHash: func() string {
+				if i == 0 {
+					return ""
+				}
+				return fmt.Sprintf("h-anchor-%03d", i-1)
+			}(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.AppendEvent(ctx, &store.Event{
+		ID: "e-anchor-bearer", SessionID: "s-seed",
+		ActorType: "agent", ActorID: "claude-code",
+		Kind: "tool_result", Hash: "h-anchor-bearer",
+		PrevHash: "h-anchor-049",
+		Refs:     []string{"git:xyz"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendEvent(ctx, &store.Event{
+		ID: "e-peer-commit", SessionID: "s-peer",
+		ActorType: "human", ActorID: "alice",
+		Kind: "commit", Hash: "h-peer-commit", Refs: []string{"git:xyz"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendLink(ctx, &store.Link{
+		FromEvent: "e-anchor-bearer", ToEvent: "e-peer-commit",
+		Relation: "produces", Confidence: 1.0, InferredBy: "shared_ref:git:xyz",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(query.NewRouter(st))
+	defer srv.Close()
+
+	body := `{"query":"{ linkedEvents(sessionId:\"s-seed\", depth:1, perSessionLimit:10) { id sessionId hash prevHash } }"}`
+	resp, err := http.Post(srv.URL+"/graphql", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	var got struct {
+		Data struct {
+			LinkedEvents []struct {
+				ID        string  `json:"id"`
+				SessionID string  `json:"sessionId"`
+				Hash      string  `json:"hash"`
+				PrevHash  *string `json:"prevHash"`
+			} `json:"linkedEvents"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Build hash → id map of returned events; the bearer's prev_hash
+	// must resolve to a rendered event so the dashed chain edge can
+	// land. With chain-context the bearer + its 10 predecessors are
+	// patched in; without it only first-psl events come back and the
+	// bearer's predecessor (h-anchor-049) is missing.
+	hashes := map[string]bool{}
+	var bearer *struct {
+		ID        string  `json:"id"`
+		SessionID string  `json:"sessionId"`
+		Hash      string  `json:"hash"`
+		PrevHash  *string `json:"prevHash"`
+	}
+	for i, e := range got.Data.LinkedEvents {
+		hashes[e.Hash] = true
+		if e.ID == "e-anchor-bearer" {
+			bearer = &got.Data.LinkedEvents[i]
+		}
+	}
+	if bearer == nil {
+		t.Fatalf("e-anchor-bearer not in result")
+	}
+	if bearer.PrevHash == nil {
+		t.Fatalf("e-anchor-bearer.prev_hash is null")
+	}
+	if !hashes[*bearer.PrevHash] {
+		t.Errorf("bearer's prev_hash %q is not in the rendered hash set; chain edge would be orphaned. Got %d events total — chain-context should pull predecessors via EventsBeforeID.", *bearer.PrevHash, len(got.Data.LinkedEvents))
+	}
+	// Sanity: total events should be bounded — chain context adds
+	// up to ~10 events per bearer, not the whole session. We have
+	// 51 anchor events; expect first-psl=10 + ~10 chain context +
+	// the bearer + 1 peer commit ≈ 22, NOT 52.
+	if len(got.Data.LinkedEvents) > 30 {
+		t.Errorf("expected chain-context to bound result (~22 events), got %d — looks like seed session was returned in full", len(got.Data.LinkedEvents))
+	}
+}

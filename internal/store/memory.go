@@ -89,6 +89,30 @@ func (m *Memory) HeadHash(_ context.Context, sessionID string) (string, error) {
 	return head, nil
 }
 
+func (m *Memory) EventsBeforeID(_ context.Context, sessionID, eventID string, limit int) ([]*Event, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// m.events is in append order, which equals id-asc per ADR / store
+	// invariant. Walk it and collect everything in the same session
+	// with id < eventID. Tail-trim to `limit` so we keep the closest
+	// (largest id, i.e. most recent) ancestors.
+	var matched []*Event
+	for _, e := range m.events {
+		if e.SessionID != sessionID {
+			continue
+		}
+		if e.ID >= eventID {
+			continue
+		}
+		cp := *e
+		matched = append(matched, &cp)
+	}
+	if limit > 0 && len(matched) > limit {
+		matched = matched[len(matched)-limit:]
+	}
+	return matched, nil
+}
+
 func (m *Memory) ListSessions(_ context.Context, limit int, since time.Time) ([]*SessionSummary, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

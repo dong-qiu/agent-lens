@@ -155,10 +155,26 @@ func (r *queryResolver) LinkedEvents(ctx context.Context, sessionID string, dept
 					}
 					// Patch in this-session link endpoints that fell
 					// past psl, so cross-session edges always have
-					// both endpoints in the rendered set.
+					// both endpoints in the rendered set. Also fetch
+					// a small chain-context window before the bearer
+					// so the dashed prev_hash edge has a rendered
+					// source — without this the bearer floats with no
+					// chain connection back to the originating
+					// TOOL_CALL even though we successfully patched
+					// it in.
 					if other.SessionID == sid && !collectedIDs[other.ID] {
 						collectedIDs[other.ID] = true
 						collected = append(collected, other)
+						const chainContext = 10
+						preds, perr := r.Store.EventsBeforeID(ctx, sid, other.ID, chainContext)
+						if perr == nil {
+							for _, p := range preds {
+								if !collectedIDs[p.ID] {
+									collectedIDs[p.ID] = true
+									collected = append(collected, p)
+								}
+							}
+						}
 					}
 					if level < d && !visited[other.SessionID] {
 						visited[other.SessionID] = true
