@@ -8,6 +8,7 @@ package query
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/dongqiu/agent-lens/internal/store"
 )
@@ -60,6 +61,27 @@ func (r *queryResolver) Events(ctx context.Context, sessionID string, limit *int
 // SessionHead is the resolver for the sessionHead field.
 func (r *queryResolver) SessionHead(ctx context.Context, sessionID string) (string, error) {
 	return r.Store.HeadHash(ctx, sessionID)
+}
+
+// Sessions is the resolver for the sessions field.
+func (r *queryResolver) Sessions(ctx context.Context, limit *int, since *time.Time) ([]*Session, error) {
+	n := 50
+	if limit != nil {
+		n = *limit
+	}
+	var sinceVal time.Time
+	if since != nil {
+		sinceVal = *since
+	}
+	list, err := r.Store.ListSessions(ctx, n, sinceVal)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*Session, 0, len(list))
+	for _, s := range list {
+		out = append(out, toGQLSession(s))
+	}
+	return out, nil
 }
 
 // Event returns EventResolver implementation.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -125,6 +126,41 @@ func (p *Postgres) EventsByRef(ctx context.Context, ref string) ([]*Event, error
 			return nil, err
 		}
 		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) ListSessions(ctx context.Context, limit int, since time.Time) ([]*SessionSummary, error) {
+	// limit <= 0 means "no limit"; PG would otherwise treat 0 literally.
+	if limit <= 0 {
+		limit = 1<<31 - 1
+	}
+	// `since` is filtered on aggregated MAX(ts), so it goes in HAVING,
+	// not WHERE — a session with old events but a recent event still
+	// qualifies. We pass NULL via the zero check so the predicate is a
+	// no-op when the caller didn't supply `since`.
+	const q = `SELECT session_id, MIN(ts), MAX(ts), COUNT(*)
+		FROM events
+		GROUP BY session_id
+		HAVING $1::timestamptz IS NULL OR MAX(ts) >= $1::timestamptz
+		ORDER BY MAX(ts) DESC, session_id ASC
+		LIMIT $2`
+	var sinceArg any
+	if !since.IsZero() {
+		sinceArg = since
+	}
+	rows, err := p.pool.Query(ctx, q, sinceArg, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*SessionSummary
+	for rows.Next() {
+		var s SessionSummary
+		if err := rows.Scan(&s.ID, &s.FirstEventAt, &s.LastEventAt, &s.EventCount); err != nil {
+			return nil, err
+		}
+		out = append(out, &s)
 	}
 	return out, rows.Err()
 }

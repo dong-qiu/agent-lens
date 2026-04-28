@@ -57,6 +57,18 @@ func nonNilStrings(s []string) []string {
 	return s
 }
 
+func toGQLSession(s *store.SessionSummary) *Session {
+	if s == nil {
+		return nil
+	}
+	return &Session{
+		ID:           s.ID,
+		FirstEventAt: s.FirstEventAt,
+		LastEventAt:  s.LastEventAt,
+		EventCount:   s.EventCount,
+	}
+}
+
 func toGQLLink(l *store.Link) *Link {
 	if l == nil {
 		return nil

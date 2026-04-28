@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -126,6 +127,86 @@ func TestQuerySessionHeadEmpty(t *testing.T) {
 	}
 	if head != "" {
 		t.Errorf("head for unknown session = %q, want empty", head)
+	}
+}
+
+// TestSessionsResolver exercises the sessions(limit, since) query.
+// Three sessions with distinct activity times are seeded; the result
+// is expected ordered by lastEventAt DESC, with eventCount and
+// lastEventAt aggregated correctly. The `since` filter is also exercised.
+func TestSessionsResolver(t *testing.T) {
+	st := store.NewMemory()
+	ctx := context.Background()
+
+	t0, _ := time.Parse(time.RFC3339, "2026-04-01T00:00:00Z")
+	mustAppend := func(id, sid string, ts time.Time) {
+		t.Helper()
+		if err := st.AppendEvent(ctx, &store.Event{
+			ID: id, SessionID: sid, TS: ts,
+			ActorType: "human", ActorID: "alice", Kind: "prompt", Hash: id,
+		}); err != nil {
+			t.Fatalf("append %s: %v", id, err)
+		}
+	}
+	// s-old: single event at t0
+	mustAppend("e-old-1", "s-old", t0)
+	// s-mid: two events at t0+1h and t0+2h
+	mustAppend("e-mid-1", "s-mid", t0.Add(1*time.Hour))
+	mustAppend("e-mid-2", "s-mid", t0.Add(2*time.Hour))
+	// s-new: one event at t0+5h (most recent)
+	mustAppend("e-new-1", "s-new", t0.Add(5*time.Hour))
+
+	srv := httptest.NewServer(query.NewRouter(st))
+	defer srv.Close()
+
+	post := func(t *testing.T, body string) []struct {
+		ID         string `json:"id"`
+		EventCount int    `json:"eventCount"`
+	} {
+		t.Helper()
+		resp, err := http.Post(srv.URL+"/graphql", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		defer resp.Body.Close()
+		var got struct {
+			Data struct {
+				Sessions []struct {
+					ID         string `json:"id"`
+					EventCount int    `json:"eventCount"`
+				} `json:"sessions"`
+			} `json:"data"`
+			Errors []map[string]any `json:"errors"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(got.Errors) > 0 {
+			t.Fatalf("graphql errors: %+v", got.Errors)
+		}
+		return got.Data.Sessions
+	}
+
+	all := post(t, `{"query":"{ sessions { id eventCount } }"}`)
+	if len(all) != 3 {
+		t.Fatalf("got %d sessions, want 3", len(all))
+	}
+	wantOrder := []string{"s-new", "s-mid", "s-old"}
+	for i, s := range all {
+		if s.ID != wantOrder[i] {
+			t.Errorf("sessions[%d].id = %q, want %q", i, s.ID, wantOrder[i])
+		}
+	}
+	if all[1].EventCount != 2 {
+		t.Errorf("s-mid eventCount = %d, want 2", all[1].EventCount)
+	}
+
+	// `since` excludes s-old (lastEventAt = t0) but keeps s-mid / s-new.
+	sinceISO := t0.Add(30 * time.Minute).Format(time.RFC3339)
+	body := `{"query":"{ sessions(since: \"` + sinceISO + `\") { id } }"}`
+	filtered := post(t, body)
+	if len(filtered) != 2 {
+		t.Fatalf("got %d filtered sessions, want 2", len(filtered))
 	}
 }
 

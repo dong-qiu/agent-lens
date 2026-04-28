@@ -43,6 +43,14 @@ type Link struct {
 type Query struct {
 }
 
+// Aggregated view of a session: id plus first/last activity and event count.
+type Session struct {
+	ID           string    `json:"id"`
+	FirstEventAt time.Time `json:"firstEventAt"`
+	LastEventAt  time.Time `json:"lastEventAt"`
+	EventCount   int       `json:"eventCount"`
+}
+
 type ActorType string
 
 const (
