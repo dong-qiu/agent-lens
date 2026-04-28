@@ -64,9 +64,8 @@ EOF
   ok "wrote .git/hooks/post-commit"
 fi
 
-cat <<EOF
-
-\033[1;32mDone.\033[0m Next:
+printf '\n\033[1;32mDone.\033[0m Next:\n'
+cat <<'EOF'
   1) Start a local agent-lens server:
        AGENT_LENS_STORE=memory go run ./cmd/agent-lens
      (Or use Postgres — see deploy/compose/.)
@@ -75,6 +74,10 @@ cat <<EOF
      'claude-code:<uuid>'.
   3) Verify the chain after a few prompts:
        agent-lens-hook verify --session 'claude-code:<your-session-id>'
+
+Heads-up: when the server is NOT running, hooks fall back to
+~/.agent-lens/sessions/<sid>.ndjson rather than failing. Delete that
+dir to clear queued events.
 
 To opt out: rm .claude/settings.local.json .git/hooks/post-commit
 EOF

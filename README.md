@@ -327,6 +327,7 @@ agent-lens-hook verify-audit-report my-trace.json
 
 ### 范围与限制
 
+- **服务挂了 ≠ 不上报**：transport 默认在 POST 失败时把 NDJSON 落到 `~/.agent-lens/sessions/<sid>.ndjson`（per-session append，0600）。这是 §13 离线/弱网兜底机制，不是"明示静默"——所以 opt-in 后即便没起 agent-lens 服务，hooks 仍会在 home dir 累积事件文件。要彻底停活：先 `rm .claude/settings.local.json .git/hooks/post-commit`，再 `rm -rf ~/.agent-lens/sessions`。
 - **不回填**：v1 自观测从激活日起算，激活前的 Claude Code 会话不导入。
 - **redaction**：thinking 文本里可能含未脱敏的代码片段；在 hook 出口处做的截断按 §12 默认走，敏感内容上链前请自行 review。
 - **GitHub webhook 回路**：要把 PR / push / workflow_run 也接进来，需要把本机服务通过隧道（ngrok / cloudflared）暴露到公网，再在 `dong-qiu/agent-lens` 仓库设置里挂 webhook。这一步 SPEC §17 没强制；按需做。
