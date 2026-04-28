@@ -450,3 +450,82 @@ func TestLinkedEventsResolver_LinkPastLimit(t *testing.T) {
 		t.Errorf("expected s-peer events in result; LinksForSession should have surfaced the link despite limit=10 (got sessions=%v)", got.Data.LinkedEvents)
 	}
 }
+
+// TestLinkedEventsResolver_LinkBearerPastLimit_PatchedIn is the
+// regression for the silent-degradation case where the anchor
+// session's link-bearing event sits past perSessionLimit. Without
+// the patch-in, the cross-session edge has source=<paged-out event
+// id> and ReactFlow silently drops it — the user sees the peer
+// session events but no visible link back to the anchor.
+//
+// This test asserts the link-bearing event is included in the
+// linkedEvents result *even when* it falls past the perSessionLimit
+// slice — so the frontend can render the edge with both endpoints.
+func TestLinkedEventsResolver_LinkBearerPastLimit_PatchedIn(t *testing.T) {
+	st := store.NewMemory()
+	ctx := context.Background()
+
+	// 100 leading no-link anchor events.
+	for i := 0; i < 100; i++ {
+		if err := st.AppendEvent(ctx, &store.Event{
+			ID: fmt.Sprintf("e-anchor-noise-%03d", i), SessionID: "s-anchor",
+			ActorType: "agent", ActorID: "claude-code",
+			Kind: "tool_call", Hash: fmt.Sprintf("h-anchor-noise-%03d", i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Anchor's link-bearing event past perSessionLimit=10.
+	if err := st.AppendEvent(ctx, &store.Event{
+		ID: "e-anchor-bearer", SessionID: "s-anchor",
+		ActorType: "agent", ActorID: "claude-code",
+		Kind: "tool_result", Hash: "h-anchor-bearer",
+		Refs: []string{"git:xyz"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendEvent(ctx, &store.Event{
+		ID: "e-peer-commit", SessionID: "s-peer",
+		ActorType: "human", ActorID: "alice",
+		Kind: "commit", Hash: "h-peer-commit", Refs: []string{"git:xyz"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendLink(ctx, &store.Link{
+		FromEvent: "e-anchor-bearer", ToEvent: "e-peer-commit",
+		Relation: "references", Confidence: 1.0, InferredBy: "shared_ref:git:xyz",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(query.NewRouter(st))
+	defer srv.Close()
+
+	body := `{"query":"{ linkedEvents(sessionId:\"s-anchor\", depth:1, perSessionLimit:10) { id sessionId } }"}`
+	resp, err := http.Post(srv.URL+"/graphql", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	var got struct {
+		Data struct {
+			LinkedEvents []struct {
+				ID        string `json:"id"`
+				SessionID string `json:"sessionId"`
+			} `json:"linkedEvents"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	hasBearer := false
+	for _, e := range got.Data.LinkedEvents {
+		if e.ID == "e-anchor-bearer" {
+			hasBearer = true
+			break
+		}
+	}
+	if !hasBearer {
+		t.Errorf("expected e-anchor-bearer (anchor's link-bearing event past perSessionLimit) to be patched into the result; got %d events: %v", len(got.Data.LinkedEvents), got.Data.LinkedEvents)
+	}
+}

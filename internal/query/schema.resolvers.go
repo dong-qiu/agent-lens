@@ -117,6 +117,7 @@ func (r *queryResolver) LinkedEvents(ctx context.Context, sessionID string, dept
 	frontier := []string{sessionID}
 	var collected []*store.Event
 
+	collectedIDs := map[string]bool{}
 	for level := 0; level <= d && len(frontier) > 0; level++ {
 		var nextFrontier []string
 		for _, sid := range frontier {
@@ -124,11 +125,21 @@ func (r *queryResolver) LinkedEvents(ctx context.Context, sessionID string, dept
 			if err != nil {
 				return nil, fmt.Errorf("ListBySession(%q): %w", sid, err)
 			}
-			collected = append(collected, evs...)
-
-			if level == d {
-				continue // last layer — don't expand further
+			for _, e := range evs {
+				if !collectedIDs[e.ID] {
+					collectedIDs[e.ID] = true
+					collected = append(collected, e)
+				}
 			}
+
+			// Always pull the links touching this session so we (a) can
+			// expand the frontier and (b) can guarantee link-bearing
+			// events from this session are present in the result even
+			// when they sit past `psl`. Without that guarantee, a
+			// cross-session edge whose anchor-side endpoint was paged
+			// out would render as an orphan and ReactFlow would
+			// silently drop it — the user sees neighbouring events
+			// floating with no visible connection back.
 			links, err := r.Store.LinksForSession(ctx, sid)
 			if err != nil {
 				// Tolerate per-session link lookup failures — they'd
@@ -142,7 +153,14 @@ func (r *queryResolver) LinkedEvents(ctx context.Context, sessionID string, dept
 					if err != nil || other == nil {
 						continue
 					}
-					if !visited[other.SessionID] {
+					// Patch in this-session link endpoints that fell
+					// past psl, so cross-session edges always have
+					// both endpoints in the rendered set.
+					if other.SessionID == sid && !collectedIDs[other.ID] {
+						collectedIDs[other.ID] = true
+						collected = append(collected, other)
+					}
+					if level < d && !visited[other.SessionID] {
 						visited[other.SessionID] = true
 						nextFrontier = append(nextFrontier, other.SessionID)
 					}
