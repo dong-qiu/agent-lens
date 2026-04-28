@@ -1,0 +1,46 @@
+{
+  "_comment": "Sample Claude Code hook config for §17 self-observation. Copy this file to .claude/settings.local.json (gitignored, per-developer) to opt in. Requires agent-lens-hook on PATH and a running agent-lens server (run `script/install-dogfood.sh` to set both up).",
+
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": "agent-lens-hook claude", "timeout": 5}
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": "agent-lens-hook claude", "timeout": 5}
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": "agent-lens-hook claude", "timeout": 5}
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {"type": "command", "command": "agent-lens-hook claude", "timeout": 5}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": "agent-lens-hook claude", "timeout": 30}
+        ]
+      }
+    ]
+  }
+}
