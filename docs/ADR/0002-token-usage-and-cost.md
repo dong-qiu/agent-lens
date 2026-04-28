@@ -1,140 +1,92 @@
-# ADR 0002: Token usage in the evidence chain
+# ADR 0002:把 token 用量纳入证据链
 
-- Status: Accepted
-- Date: 2026-04-28
-- Supersedes: —
-- Amends: SPEC §5, §7, §10.1, §15, §17
+- 状态:Accepted
+- 日期:2026-04-28
+- 取代:—
+- 修订:SPEC §5、§7、§10.1、§15、§17
 
-## Context
+## 背景
 
-SPEC v0.4 §10.1 declared, as a known limitation, that the Claude Code hook +
-transcript path "does not capture token usage or stop_reason; switch to the
-proxy deep-mode (§10.4) when those are needed." §17 repeated the claim. That
-parked token accounting behind M4+ and made the proxy deep-mode the gating
-dependency for any usage dashboard.
+SPEC v0.4 §10.1 把 Claude Code hook + transcript 路径列为已知限制:"不抓 token usage 和 stop_reason;需要时切到 §10.4 的 proxy deep-mode"。§17 重复了这条限制。结果是 token 计量被推到 M4+,proxy deep-mode 成了任何 usage dashboard 的前置依赖。
 
-A new requirement: the auditable evidence chain must record token consumption
-per human↔Coding-Agent turn.
+新需求:可审计的证据链必须按"人 ↔ Coding Agent" 每一轮记录 token 消耗。
 
-Before accepting the cost of M4+ proxy work, we re-checked the transcript
-itself. The result invalidates the §10.1 / §17 limitation.
+在动手做 M4+ proxy 之前,我们重新查了 transcript 本身。结论**推翻**了 §10.1 / §17 的那条限制。
 
-## Validation
+## 验证
 
-We inspected two real Claude Code transcripts under
-`~/.claude/projects/-Users-dongqiu-Dev-code-agent-lens/` (both from this
-repo's own development — same user, same model `claude-opus-4-7`, similar
-workflow with extended thinking enabled):
+我们检查了 `~/.claude/projects/-Users-dongqiu-Dev-code-agent-lens/` 下两份真实 Claude Code transcript(都是这个仓库自己开发产生的 —— 同一用户、同一模型 `claude-opus-4-7`、相似工作流且 extended thinking 开着):
 
-- Small session (`2e5479d3-...jsonl`): **19 / 19** assistant messages carry a
-  populated `message.usage`.
-- Large session (`330c2b60-...jsonl`): **1080 / 1080** real assistant messages
-  carry a populated `message.usage`. One additional `<synthetic>` message
-  appears with all-zero usage and `stop_reason=stop_sequence` — easy to
-  identify and skip.
+- 小 session(`2e5479d3-...jsonl`):**19 / 19** 条 assistant 消息都带有非空 `message.usage`。
+- 大 session(`330c2b60-...jsonl`):**1080 / 1080** 条真实 assistant 消息都带 `message.usage`。另外多出一条 `<synthetic>` 消息,usage 全零、`stop_reason=stop_sequence` —— 容易识别并跳过。
 
-`message.usage` contains every dimension we need for usage accounting:
+`message.usage` 包含 usage 计量需要的全部维度:
 
-| Field | Meaning |
+| 字段 | 含义 |
 |---|---|
-| `input_tokens` | Non-cached input tokens |
-| `output_tokens` | Output tokens |
-| `cache_read_input_tokens` | Cache-hit reads |
-| `cache_creation_input_tokens` | Total tokens written to cache |
-| `cache_creation.ephemeral_5m_input_tokens` | 5-minute TTL portion |
-| `cache_creation.ephemeral_1h_input_tokens` | 1-hour TTL portion |
+| `input_tokens` | 非缓存的 input tokens |
+| `output_tokens` | output tokens |
+| `cache_read_input_tokens` | 缓存命中读取 |
+| `cache_creation_input_tokens` | 写入缓存的总 token 数 |
+| `cache_creation.ephemeral_5m_input_tokens` | 5 分钟 TTL 部分 |
+| `cache_creation.ephemeral_1h_input_tokens` | 1 小时 TTL 部分 |
 | `service_tier` | `standard` / `priority` / `batch` |
-| `server_tool_use.web_search_requests` | Server-side web-search invocations |
-| `server_tool_use.web_fetch_requests` | Server-side web-fetch invocations |
-| `iterations` | Sub-message iterations when `stop_reason=tool_use` |
+| `server_tool_use.web_search_requests` | 服务端 web-search 调用次数 |
+| `server_tool_use.web_fetch_requests` | 服务端 web-fetch 调用次数 |
+| `iterations` | 当 `stop_reason=tool_use` 时的子消息迭代次数 |
 
-Sibling fields `message.model` (e.g. `claude-opus-4-7`) and
-`message.stop_reason` (`end_turn` / `tool_use` / `stop_sequence` / null) are
-adjacent to `usage` and equally accessible. Both were also listed as "not
-captured" by §10.1; both are in fact present.
+兄弟字段 `message.model`(例如 `claude-opus-4-7`)和 `message.stop_reason`(`end_turn` / `tool_use` / `stop_sequence` / null)就在 `usage` 旁边,同样可读。这两个也曾被 §10.1 列为"未抓",实际都在。
 
-Aggregate from the large session (1080 messages):
+大 session 的聚合(1080 条消息):
 
-- input: 1,660
-- output: 1,174,295
-- cache write: 3,346,839
-- **cache read: 416,961,148**
+- input:1,660
+- output:1,174,295
+- cache write:3,346,839
+- **cache read:416,961,148**
 
-Cache-read dominates by two orders of magnitude. Any usage dashboard that
-collapses cache reads into "input" would distort the picture by ~250×; the
-breakdown matters even when no money is involved.
+cache-read 比其他维度高出**两个数量级**。任何把 cache reads 折叠进 "input" 的 usage dashboard 会把图景扭曲约 250 倍 —— **即使不算钱,这个分维也是要保留的**。
 
-**Coverage caveat:** these two transcripts share user, model, and workflow
-shape. Cross-project, cross-model (haiku / sonnet / non-Anthropic), and
-no-cache-hit transcripts have not been exercised. The first M2-E
-implementation should re-confirm both the `usage` schema and the
-`<synthetic>` shape against transcripts from a different repo and at
-least one different model before the observations below are treated as
-universally true.
+**覆盖度告警**:这两份 transcript 共享同用户、同模型、同工作流。跨项目、跨模型(haiku / sonnet / 非 Anthropic)、无 cache hit 的 transcript 还没测过。M2-E 第一次落地实现时,应当**对一份不同仓库 + 至少一份不同模型的 transcript 重新核对** `usage` schema 和 `<synthetic>` 形态,然后才能把下面的观察当作普适事实。
 
-## Why not cost
+## 为什么不做 cost
 
-We considered including a cost estimate (price table × usage). After review
-we deferred it indefinitely:
+我们考虑过一并加 cost 估算(price table × usage)。复盘后**无限期延后**:
 
-- Vendor pricing differs in structure, not just numbers: Anthropic bills
-  cache writes with TTL-dependent multipliers; OpenAI bills cached input as
-  a flat discount; per-call billing for server-side tools (web_search /
-  web_fetch) has no analogue on most other vendors. A unified `$` figure
-  hides decisions an auditor would want to see.
-- Maintaining a multi-vendor price table is operational work (rate changes,
-  new tiers, regional differences) that distracts from Agent Lens's core
-  job — recording what happened.
-- Token counts are the audit-relevant primitive. Cost is a derived,
-  organisation-specific concern (billing accounts, negotiated rates, BYOK
-  vs API) that downstream tooling can compute against the raw counts when
-  it actually needs to.
+- 厂商定价**结构**不一样,不只是数字差:Anthropic 的 cache write 按 TTL 不同有不同倍率;OpenAI 的 cached input 是平价折扣;web_search / web_fetch 这类服务端工具的按次计费在多数厂商根本没对应物。统一一个 `$` 数字会把审计员真正需要看的决策**藏起来**。
+- 维护多厂商价格表是运维工作(费率变动、新档位、地区差异),会分散 Agent Lens 的核心职责 —— **记录发生了什么**。
+- Token 数才是审计相关的原语。Cost 是衍生的、组织相关的关注点(billing 账户、议价费率、BYOK vs API),下游工具想算时拿原始 token 数自己算就行。
 
-The capture path stays cost-ready: events store everything a future cost
-calculation would need (tokens by dimension, model, service_tier, vendor).
-Re-introducing cost is a query/UI/config layer addition, not a schema
-change.
+捕获路径**保持 cost-ready**:事件里存了未来算 cost 需要的所有维度(按维度分的 token、model、service_tier、vendor)。重新引入 cost 是 query / UI / config 层的添加,不需要 schema 迁移。
 
-Reconsider this decision if downstream tooling consistently demands a
-unified cost view that the raw-token contract cannot satisfy — for
-example, if auditors need an `est_cost_usd` column they cannot compute
-themselves, or if multi-tenant deployments need centrally-governed price
-tables. The "out of scope" framing here is operational (avoid building a
-distracting price-table service in v1), not principled.
+如果下游工具持续要求一个"原始 token 算不出来的统一 cost 视图" —— 比如审计员需要一个他们自己算不出的 `est_cost_usd` 列,或者多租户部署需要中心化治理的价格表 —— 重新评估这个决策。这里"out of scope"的措辞是**操作性**的(避免在 v1 里塞个会分散精力的 price-table 服务),不是原则性的。
 
-## Decision
+## 决定
 
-### D1. Embed usage in existing event payloads, do not introduce a new EventKind.
+### D1. 把 usage 嵌在已有事件 payload 里,不引入新 EventKind
 
-Each assistant-message-derived event (`DECISION` for the `text` block,
-`THOUGHT` for the `thinking` block) carries an optional `usage` sub-object in
-its payload. Turn-level and session-level totals are computed in the query
-layer, not stored as separate events.
+每条 assistant 消息派生出的事件(`text` 块 → `DECISION`,`thinking` 块 → `THOUGHT`)在 payload 里带一个可选的 `usage` 子对象。Turn 级和 session 级总额由 query 层算,不作为单独事件落库。
 
-**Rejected alternative:** a dedicated `EVENT_KIND_USAGE`. Usage is metadata
-*about* a message, not a behaviour in its own right. A dedicated kind would
-require an extra `Link` back to the producing message and bloat the event
-stream by ~2× for no consumer benefit.
+**否决备选**:专门一个 `EVENT_KIND_USAGE`。Usage 是关于消息的 metadata,不是独立行为。专设 kind 需要回链到产生消息的 `Link`,把事件流体积膨胀约 2×,消费者却没收益。
 
-### D2. Standardize a vendor-neutral `TokenUsage` shape. Vendor-specific schemas are normalised at ingest.
+### D2. 标准化一个 vendor-neutral 的 `TokenUsage` shape,vendor 特定 schema 在 ingest 处归一化
 
 ```
 TokenUsage {
   vendor:                  "anthropic" | "openai" | ...
-  model:                   string                       // raw vendor model id
+  model:                   string                       // 厂商原始 model id
   service_tier?:           string
   input_tokens:            int
   output_tokens:           int
   cache_read_tokens?:      int
-  cache_write_5m_tokens?:  int                          // anthropic-specific today
-  cache_write_1h_tokens?:  int                          // anthropic-specific today
+  cache_write_5m_tokens?:  int                          // 当前 anthropic 特有
+  cache_write_1h_tokens?:  int                          // 当前 anthropic 特有
   web_search_calls?:       int
   web_fetch_calls?:        int
-  raw?:                    object                       // verbatim vendor block, for forensic re-parse
+  raw?:                    object                       // 厂商原始块,留给取证再解析
 }
 ```
 
-Claude Code mapping (from `message.usage`):
+Claude Code 映射(从 `message.usage`):
 
 - `input_tokens`            → `input_tokens`
 - `output_tokens`           → `output_tokens`
@@ -143,64 +95,35 @@ Claude Code mapping (from `message.usage`):
 - `cache_creation.ephemeral_1h_input_tokens` → `cache_write_1h_tokens`
 - `server_tool_use.web_search_requests`      → `web_search_calls`
 - `server_tool_use.web_fetch_requests`       → `web_fetch_calls`
-- whole `usage` block                         → `raw` (so future re-derivation
-  is possible if we discover we under-captured a field)
+- 整个 `usage` 块                              → `raw`(以便发现自己漏抓字段时反推)
 
-The optional fields are frankly Anthropic-shaped today. When OpenCode /
-Cursor / OpenAI vendors land, we extend the shape rather than coerce
-foreign concepts into these names — adding e.g. `cached_tokens` for
-OpenAI's flat-discount model, kept under the same `TokenUsage` umbrella.
+可选字段的形状今天明显是 Anthropic-shaped。OpenCode / Cursor / OpenAI 厂商接入时,**扩展 shape 而非把外来概念硬塞进现有命名** —— 比如为 OpenAI 的平价折扣模式加 `cached_tokens`,仍然挂在 `TokenUsage` 这把伞下。
 
-`raw` is intentionally redundant. It costs a few hundred bytes per event and
-buys us insurance against vendor schema drift and our own normalisation
-mistakes.
+`raw` 是有意冗余。它每条事件多几百字节,买的是对**厂商 schema 漂移**和**我们自己归一化错误**的保险。
 
-### D3. Messages without usable usage are treated as metadata-only and logged at INFO.
+### D3. 没有可用 usage 的消息按 metadata-only 处理,INFO 日志记一下
 
-The `<synthetic>` model marker (Claude Code's own injected stop-sequence,
-observed once in the validation sample with an all-zero usage block) is the
-prompting case, but the rule generalises. If any of the following hold —
-`message.model == "<synthetic>"`, `message.usage` absent, or every numeric
-field in `usage` is zero — treat the message as metadata-only: emit any
-non-usage event content normally, skip the `TokenUsage` extraction, and
-**log at INFO with the offending shape so we can revisit if the assumption
-breaks**. Do not fail-error and do not drop the event.
+`<synthetic>` 这个 model 标记(Claude Code 自己注入的 stop sequence,验证样本里观察到 1 次,usage 全零)是触发场景,但规则是更通用的:**满足任一条件**就视为 metadata-only —— `message.model == "<synthetic>"`,或 `message.usage` 缺失,或 `usage` 里所有数值字段都为零。
 
-The `<synthetic>` shape is observed n=1 today; INFO-level logging is the
-explicit hedge against silently dropping richer data if a future Claude
-Code version starts populating `usage` for these messages.
+处理方式:正常发出非 usage 部分的事件内容、跳过 `TokenUsage` 抽取,**用 INFO 级别日志记下违规形态**以便回看时复盘是否假设破了。**不抛 error,不丢事件**。
 
-## Scope (this ADR)
+`<synthetic>` 形态今天观察到 n=1;INFO 日志是显式 hedge,防止未来某个 Claude Code 版本开始往这类消息里填真 usage 时被我们悄悄扔掉。
 
-This ADR is documentation only. It updates SPEC and records decisions. The
-concrete implementation lands in a follow-up milestone (M2-E or M3 sub-item):
+## Scope(本 ADR 范围)
 
-- transcript usage extraction in `internal/transcript/`
-- `payload.usage` shape contract (no proto enum changes needed; payload is
-  `google.protobuf.Struct`)
-- GraphQL exposure: `Event.usage`, `Turn.totalUsage`, `Session.totalUsage`
-  resolvers
-- Lens UI: per-turn token breakdown, session-level totals
+本 ADR 只做文档。它更新 SPEC、记录决策。具体实现落到下一个里程碑(M2-E 或 M3 子项):
 
-No code changes ship with this ADR.
+- `internal/transcript/` 里加 transcript usage 抽取
+- `payload.usage` shape 契约(不需要改 proto enum,payload 是 `google.protobuf.Struct`)
+- GraphQL 暴露:`Event.usage`、`Turn.totalUsage`、`Session.totalUsage` resolver
+- Lens UI:每轮 token 分维 + session 级总额
 
-## Consequences
+**本 ADR 不带任何代码改动**。
 
-- §10.1 / §17 limitation language is wrong and is being removed in the same
-  changeset. Hook path is now declared as the source of truth for usage and
-  stop_reason; §10.4 proxy deep-mode is no longer the gating dependency for
-  usage features.
-- The v1 evidence chain gains a token-usage dimension without adding M4+
-  scope.
-- Cost / pricing is explicitly out of scope. Re-introducing it later is a
-  pure additive change (price-table config + query/UI layer); no event
-  schema migration would be required.
-- Cross-vendor support (OpenCode, Cursor, custom agents) is now schema-ready
-  via D2 but each new vendor still needs a mapping function. That work is
-  per-integration and tracked as part of §10.2 / §10.3.
-- Attestation-predicate inclusion of token totals is intentionally NOT
-  decided here. The data is captured in events and turn-level totals are
-  computable from the query layer; whoever next revises
-  `agent-lens.dev/code-provenance/v1` (shipped in M3-B-2) or its successors
-  picks what to embed and whether to extend v1 vs. bump to v2. That call
-  belongs to the attestation-revision PR, not this ADR.
+## 后果
+
+- §10.1 / §17 那段限制语 wrong,在同一个 changeset 里被移除。Hook path 现在被声明为 usage 和 stop_reason 的真理来源;§10.4 proxy deep-mode 不再是 usage 特性的前置依赖。
+- v1 证据链获得 token-usage 维度,**不需要扩 M4+ scope**。
+- Cost / pricing 显式不在 scope。后续要重新引入是纯叠加(price-table 配置 + query / UI 层),不需要事件 schema 迁移。
+- 跨厂商支持(OpenCode / Cursor / 自研 agent)经 D2 已经 schema-ready,但每个新厂商仍要写 mapping 函数。这部分按厂商单独跟,挂在 §10.2 / §10.3 下。
+- Attestation predicate 是否包含 token 总额**故意不在这里决定**。数据已经在事件里、turn 级总额可由 query 层算出;下次修订 `agent-lens.dev/code-provenance/v1`(M3-B-2 已发)或其后续版本的人决定塞什么、扩 v1 还是 bump v2。这归给 attestation-revision 的 PR,不归本 ADR。
