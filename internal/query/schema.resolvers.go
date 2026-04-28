@@ -121,7 +121,21 @@ func (r *queryResolver) LinkedEvents(ctx context.Context, sessionID string, dept
 	for level := 0; level <= d && len(frontier) > 0; level++ {
 		var nextFrontier []string
 		for _, sid := range frontier {
-			evs, err := r.Store.ListBySession(ctx, sid, psl)
+			// Seed session ignores perSessionLimit. The user explicitly
+			// opened this session to investigate it; capping here means
+			// link-bearing events past psl are patched in (correct, see
+			// link-discovery comment below) but their chain neighbours
+			// aren't, so the prev_hash dashed line into the patched-in
+			// event has no source node and ReactFlow silently drops it
+			// — visually the link-bearer floats next to the peer's
+			// COMMIT with no chain connection back to the originating
+			// TOOL_CALL. Peer sessions still respect psl since they
+			// can be arbitrarily large and we don't need them whole.
+			limit := psl
+			if sid == sessionID {
+				limit = 0
+			}
+			evs, err := r.Store.ListBySession(ctx, sid, limit)
 			if err != nil {
 				return nil, fmt.Errorf("ListBySession(%q): %w", sid, err)
 			}

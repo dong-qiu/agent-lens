@@ -529,3 +529,112 @@ func TestLinkedEventsResolver_LinkBearerPastLimit_PatchedIn(t *testing.T) {
 		t.Errorf("expected e-anchor-bearer (anchor's link-bearing event past perSessionLimit) to be patched into the result; got %d events: %v", len(got.Data.LinkedEvents), got.Data.LinkedEvents)
 	}
 }
+
+// TestLinkedEventsResolver_SeedSessionUnbounded is the regression for
+// the visual silent-degradation: when the link-bearing event in the
+// SEED session sits past perSessionLimit, the link-bearer itself is
+// patched in (covered by TestLinkedEventsResolver_LinkBearerPastLimit_PatchedIn)
+// but its chain neighbours (the matching TOOL_CALL one row earlier,
+// the next agent action one row later) aren't. The result is a
+// patched-in event with no rendered prev_hash predecessor → the
+// dashed chain edge has source=non-rendered → ReactFlow silently
+// drops it. Visually the link-bearer floats next to the peer's
+// COMMIT with no chain connection back.
+//
+// Fix: seed session ignores perSessionLimit. The user explicitly
+// opened this session to investigate; the full chain is the audit
+// story.
+func TestLinkedEventsResolver_SeedSessionUnbounded(t *testing.T) {
+	st := store.NewMemory()
+	ctx := context.Background()
+
+	// 50 anchor events, link-bearing TOOL_RESULT at index 50.
+	for i := 0; i < 50; i++ {
+		if err := st.AppendEvent(ctx, &store.Event{
+			ID: fmt.Sprintf("e-anchor-%03d", i), SessionID: "s-seed",
+			ActorType: "agent", ActorID: "claude-code",
+			Kind: "tool_call", Hash: fmt.Sprintf("h-anchor-%03d", i),
+			PrevHash: func() string {
+				if i == 0 {
+					return ""
+				}
+				return fmt.Sprintf("h-anchor-%03d", i-1)
+			}(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.AppendEvent(ctx, &store.Event{
+		ID: "e-anchor-bearer", SessionID: "s-seed",
+		ActorType: "agent", ActorID: "claude-code",
+		Kind: "tool_result", Hash: "h-anchor-bearer",
+		PrevHash: "h-anchor-049",
+		Refs:     []string{"git:xyz"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendEvent(ctx, &store.Event{
+		ID: "e-peer-commit", SessionID: "s-peer",
+		ActorType: "human", ActorID: "alice",
+		Kind: "commit", Hash: "h-peer-commit", Refs: []string{"git:xyz"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendLink(ctx, &store.Link{
+		FromEvent: "e-anchor-bearer", ToEvent: "e-peer-commit",
+		Relation: "produces", Confidence: 1.0, InferredBy: "shared_ref:git:xyz",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(query.NewRouter(st))
+	defer srv.Close()
+
+	body := `{"query":"{ linkedEvents(sessionId:\"s-seed\", depth:1, perSessionLimit:10) { id sessionId hash prevHash } }"}`
+	resp, err := http.Post(srv.URL+"/graphql", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	var got struct {
+		Data struct {
+			LinkedEvents []struct {
+				ID        string  `json:"id"`
+				SessionID string  `json:"sessionId"`
+				Hash      string  `json:"hash"`
+				PrevHash  *string `json:"prevHash"`
+			} `json:"linkedEvents"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Build hash → id map of returned events; the bearer's prev_hash
+	// must resolve to a rendered event so the dashed chain edge can
+	// land. With seed-unbounded all 51 anchor events come back; with
+	// seed capped at psl=10 only the first 10 come back and the
+	// bearer's predecessor (h-anchor-049) is missing.
+	hashes := map[string]bool{}
+	var bearer *struct {
+		ID        string  `json:"id"`
+		SessionID string  `json:"sessionId"`
+		Hash      string  `json:"hash"`
+		PrevHash  *string `json:"prevHash"`
+	}
+	for i, e := range got.Data.LinkedEvents {
+		hashes[e.Hash] = true
+		if e.ID == "e-anchor-bearer" {
+			bearer = &got.Data.LinkedEvents[i]
+		}
+	}
+	if bearer == nil {
+		t.Fatalf("e-anchor-bearer not in result")
+	}
+	if bearer.PrevHash == nil {
+		t.Fatalf("e-anchor-bearer.prev_hash is null")
+	}
+	if !hashes[*bearer.PrevHash] {
+		t.Errorf("bearer's prev_hash %q is not in the rendered hash set; chain edge would be orphaned. Got %d events total — seed session should be unbounded so all 51 anchor events come back.", *bearer.PrevHash, len(got.Data.LinkedEvents))
+	}
+}
