@@ -26,6 +26,7 @@ Kinds:
   code-provenance   agent-lens.dev/code-provenance/v1 (commit boundary)
   slsa-build        slsa.dev/provenance/v1 (build boundary)
   deploy-evidence   agent-lens.dev/deploy-evidence/v1 (deploy boundary)
+  audit-report      agent-lens.dev/audit-report/v1 (whole-trace bundle)
 `
 
 func runExport(args []string) {
@@ -50,6 +51,11 @@ func runExport(args []string) {
 	case "deploy-evidence":
 		if err := exportDeployEvidence(args[1:], os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "agent-lens-hook export deploy-evidence: %v\n", err)
+			os.Exit(1)
+		}
+	case "audit-report":
+		if err := runExportAuditReport(args[1:], os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "agent-lens-hook export audit-report: %v\n", err)
 			os.Exit(1)
 		}
 	default:

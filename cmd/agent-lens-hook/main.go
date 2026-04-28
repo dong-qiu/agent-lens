@@ -11,12 +11,13 @@ Usage:
   agent-lens-hook <subcommand> [flags]
 
 Subcommands:
-  claude               Capture a Claude Code hook payload from stdin and forward.
-  git-post-commit      Capture a git post-commit event and forward.
-  verify               Verify the local hash chain of a session.
-  keygen               Generate an ed25519 key pair for DSSE attestations.
-  export               Export an in-toto / SLSA attestation for a trace.
-  verify-attestation   Verify a DSSE-wrapped in-toto attestation file.
+  claude                 Capture a Claude Code hook payload from stdin and forward.
+  git-post-commit        Capture a git post-commit event and forward.
+  verify                 Verify the local hash chain of a session.
+  keygen                 Generate an ed25519 key pair for DSSE attestations.
+  export                 Export an in-toto / SLSA attestation, or an audit report.
+  verify-attestation     Verify a DSSE-wrapped in-toto attestation file.
+  verify-audit-report    Verify an audit-report bundle.
 
 Environment:
   AGENT_LENS_URL    Ingest endpoint (default http://localhost:8787)
@@ -41,6 +42,8 @@ func main() {
 		runExport(os.Args[2:])
 	case "verify-attestation":
 		runVerifyAttestation(os.Args[2:])
+	case "verify-audit-report":
+		runVerifyAuditReport(os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -55,3 +58,4 @@ func main() {
 // runKeygen is implemented in keygen.go.
 // runExport is implemented in export.go.
 // runVerifyAttestation is implemented in verify_attestation.go.
+// runVerifyAuditReport is implemented in audit_report.go.

@@ -150,7 +150,40 @@ agent-lens-hook export deploy-evidence \
 - POST `/webhooks/deploy` 时带 `Idempotency-Key: <ulid>`——这个 key 同时被服务器当成 event id 用，客户端预生成、自己留底。
 - 没设 `Idempotency-Key` 时只能事后用 GraphQL `events(sessionId: "deploy:<env>", limit: 10)` 查时间线（响应里的 `id` 字段）。
 
-## 校验 attestation
+### 导出 audit-report（整条证据链打包）
+
+把一个 root event id 起点的整条证据链打成单文件 JSON，包含所有相关 session 的 events、哈希链、可选嵌入的 attestations，以及 manifest sha256，自鉴防篡改。
+
+```bash
+agent-lens-hook export audit-report \
+  --root <event-id> \
+  --attestation deploy.intoto.jsonl \
+  --attestation slsa.intoto.jsonl \
+  --attestation code.intoto.jsonl \
+  --out audit-report.json
+```
+
+- `--root` 取一个 deploy / commit / pr / build event id；BFS 沿 `event.links` 把所有可达 session 拉进来（默认上限 50 session，靠 `--max-sessions` 调）。
+- `--attestation` 可重复，把 `.intoto.jsonl` 文件原样嵌入；记录 sha256，verifier 可以脱机比对。
+- 输出 JSON 顶层有 `manifest.{sessions_sha256, attestations_sha256}`，重命名 / 改字段 / 加事件 / 改 attestation 都会被 verifier 当场抓出来。
+
+## 校验 audit-report
+
+```bash
+agent-lens-hook verify-audit-report audit-report.json \
+  --pub ~/.agent-lens/keys/ed25519.pub
+# OK · version agent-lens.dev/audit-report/v1 · 3 sessions · 17 events · attestations: 3 verified, 0 skipped
+```
+
+校验流程：
+1. **Manifest re-hash**——Sessions / Attestations 字节重做 sha256，跟报告里的 manifest 比对。
+2. **逐 session 链式校验**——每个 event 的 `prev_hash` 必须等于前一个 event 的 `hash`；`head_hash` 必须等于最后一个 event 的 `hash`。
+3. **嵌入 attestation 重 hash**——envelope 字节重算 sha256 跟记录值比对。
+4. **DSSE 验签**（可选）——给了 `--pub` 就逐条校验签名；省略 `--pub` 默认走 `~/.agent-lens/keys/ed25519.pub`，文件不存在则跳过 DSSE（manifest+chain 两步仍然走完）；显式 `--pub=` 强制跳过。
+
+退出码：0 干净，1 发现 issue（链断 / hash 不匹配 / DSSE 验签失败），2 用法或文件错。这套语义跟 `verify-attestation` 一致，CD pipeline 直接 gate 在 exit 1 上。
+
+## 校验单个 attestation
 
 ```bash
 agent-lens-hook verify-attestation deploy.intoto.jsonl \
