@@ -9,21 +9,26 @@ function getInitialSession(): string {
 export default function App() {
   const [sessionId, setSessionId] = useState<string>(getInitialSession);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (sessionId) params.set("session", sessionId);
-    else params.delete("session");
-    const qs = params.toString();
-    const url = `${window.location.pathname}${qs ? `?${qs}` : ""}`;
-    window.history.replaceState(null, "", url);
-  }, [sessionId]);
-
-  // Keep view in sync with browser back/forward.
+  // Browser back/forward replays whatever URL was last pushed; mirror
+  // it back into component state.
   useEffect(() => {
     const onPop = () => setSessionId(getInitialSession());
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+
+  // pushState (not replaceState) so each list↔timeline transition
+  // gets its own history entry — otherwise back skips out of the app.
+  const navigate = (next: string) => {
+    if (next === sessionId) return;
+    const params = new URLSearchParams(window.location.search);
+    if (next) params.set("session", next);
+    else params.delete("session");
+    const qs = params.toString();
+    const url = `${window.location.pathname}${qs ? `?${qs}` : ""}`;
+    window.history.pushState(null, "", url);
+    setSessionId(next);
+  };
 
   const subtitle = sessionId ? "M1 timeline" : "M2 sessions";
 
@@ -34,7 +39,7 @@ export default function App() {
           <div className="flex items-baseline gap-3">
             <button
               type="button"
-              onClick={() => setSessionId("")}
+              onClick={() => navigate("")}
               className="text-xl font-semibold hover:text-zinc-700"
             >
               Agent Lens
@@ -44,7 +49,7 @@ export default function App() {
           {sessionId && (
             <button
               type="button"
-              onClick={() => setSessionId("")}
+              onClick={() => navigate("")}
               className="text-xs text-zinc-500 underline-offset-2 hover:underline"
             >
               ← all sessions
@@ -56,7 +61,7 @@ export default function App() {
         {sessionId ? (
           <Timeline sessionId={sessionId} />
         ) : (
-          <SessionList onSelect={setSessionId} />
+          <SessionList onSelect={navigate} />
         )}
       </main>
     </div>
