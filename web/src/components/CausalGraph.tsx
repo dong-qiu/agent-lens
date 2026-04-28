@@ -1,10 +1,12 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import ReactFlow, {
   Background,
   Controls,
   MarkerType,
   MiniMap,
+  ReactFlowProvider,
+  useReactFlow,
   type Edge,
   type Node,
 } from "reactflow";
@@ -156,6 +158,48 @@ function buildGraph(events: Event[]): { nodes: Node[]; edges: Edge[] } {
   return { nodes, edges };
 }
 
+// Inner canvas — must live under <ReactFlowProvider> so useReactFlow()
+// can read/write the viewport. We use this primarily so MiniMap onClick
+// can pan the main canvas: pannable / zoomable on MiniMap depend on a
+// d3-zoom binding that has been observed to misfire under React 18
+// StrictMode, so onClick → setCenter is the reliable navigation path.
+function GraphCanvas({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
+  const flow = useReactFlow();
+  const onMiniMapClick = useCallback(
+    (_evt: React.MouseEvent, position: { x: number; y: number }) => {
+      flow.setCenter(position.x, position.y, { zoom: 1, duration: 250 });
+    },
+    [flow],
+  );
+
+  return (
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      fitView
+      nodesDraggable={false}
+      nodesConnectable={false}
+      elementsSelectable={false}
+      proOptions={{ hideAttribution: true }}
+    >
+      <Background gap={16} size={1} color="#e4e4e7" />
+      <Controls showInteractive={false} />
+      <MiniMap
+        pannable
+        zoomable
+        onClick={onMiniMapClick}
+        ariaLabel="Causal graph minimap"
+        nodeColor={(n) => {
+          const k = (n.data as { kind?: EventKind } | undefined)?.kind;
+          return (k && MINIMAP_HEX[k]) || "#a1a1aa";
+        }}
+        nodeStrokeWidth={0}
+        maskColor="rgba(255, 255, 255, 0.6)"
+      />
+    </ReactFlow>
+  );
+}
+
 export function CausalGraph({ sessionId }: { sessionId: string }) {
   // Same queryKey as Timeline: react-query dedupes the fetch and both
   // views share the cache, so toggling Timeline ↔ Graph never re-fetches.
@@ -191,34 +235,9 @@ export function CausalGraph({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="h-[calc(100vh-180px)] overflow-hidden rounded border border-zinc-200 bg-white">
-      <ReactFlow
-        nodes={graph.nodes}
-        edges={graph.edges}
-        fitView
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={false}
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background gap={16} size={1} color="#e4e4e7" />
-        <Controls showInteractive={false} />
-        <MiniMap
-          pannable
-          zoomable
-          ariaLabel="Causal graph minimap"
-          nodeColor={(n) => {
-            const k = (n.data as { kind?: EventKind } | undefined)?.kind;
-            return (k && MINIMAP_HEX[k]) || "#a1a1aa";
-          }}
-          nodeStrokeWidth={0}
-          maskColor="rgba(255, 255, 255, 0.6)"
-          style={{
-            background: "#fafafa",
-            border: "1px solid #e4e4e7",
-            borderRadius: 4,
-          }}
-        />
-      </ReactFlow>
+      <ReactFlowProvider>
+        <GraphCanvas nodes={graph.nodes} edges={graph.edges} />
+      </ReactFlowProvider>
     </div>
   );
 }
