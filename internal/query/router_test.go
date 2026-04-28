@@ -3,6 +3,7 @@ package query_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -275,5 +276,177 @@ func TestEventLinksResolver(t *testing.T) {
 	}
 	if link.InferredBy != "shared_ref:git:abc" {
 		t.Errorf("inferred_by = %q", link.InferredBy)
+	}
+}
+
+
+// TestLinkedEventsResolver covers the BFS by session id: two sessions
+// share a `git:<sha>` ref; the linker emits a cross-session link. A
+// linkedEvents query starting at one session at depth=1 returns events
+// from both. depth=0 collapses to single-session (parity with
+// events()).
+func TestLinkedEventsResolver(t *testing.T) {
+	st := store.NewMemory()
+	ctx := context.Background()
+
+	// Seed: claude session has a tool_result with git:<sha> ref;
+	// git session has a commit with the same ref. linker emits link.
+	mustAppend := func(id, sid, kind string, refs []string) {
+		t.Helper()
+		if err := st.AppendEvent(ctx, &store.Event{
+			ID:        id,
+			SessionID: sid,
+			ActorType: "agent",
+			ActorID:   "claude-code",
+			Kind:      kind,
+			Hash:      "h-" + id,
+			Refs:      refs,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustAppend("e-claude-prompt", "s-claude", "prompt", nil)
+	mustAppend("e-claude-call", "s-claude", "tool_call", nil)
+	mustAppend("e-claude-result", "s-claude", "tool_result", []string{"git:abc"})
+	mustAppend("e-git-commit", "s-git", "commit", []string{"git:abc"})
+
+	if err := st.AppendLink(ctx, &store.Link{
+		FromEvent:  "e-claude-result",
+		ToEvent:    "e-git-commit",
+		Relation:   "references",
+		Confidence: 1.0,
+		InferredBy: "shared_ref:git:abc",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(query.NewRouter(st))
+	defer srv.Close()
+
+	type result struct {
+		Data struct {
+			LinkedEvents []struct {
+				ID        string `json:"id"`
+				SessionID string `json:"sessionId"`
+			} `json:"linkedEvents"`
+		} `json:"data"`
+		Errors []map[string]any `json:"errors"`
+	}
+	post := func(t *testing.T, body string) result {
+		t.Helper()
+		resp, err := http.Post(srv.URL+"/graphql", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		defer resp.Body.Close()
+		var r result
+		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(r.Errors) > 0 {
+			t.Fatalf("graphql errors: %+v", r.Errors)
+		}
+		return r
+	}
+
+	// depth=0 returns only the seed session's events.
+	r0 := post(t, `{"query":"{ linkedEvents(sessionId:\"s-claude\", depth:0) { id sessionId } }"}`)
+	gotSessions0 := map[string]int{}
+	for _, e := range r0.Data.LinkedEvents {
+		gotSessions0[e.SessionID]++
+	}
+	if gotSessions0["s-claude"] != 3 || gotSessions0["s-git"] != 0 {
+		t.Errorf("depth=0 sessions = %v, want s-claude:3 only", gotSessions0)
+	}
+
+	// depth=1 picks up the linked git session via the shared ref.
+	r1 := post(t, `{"query":"{ linkedEvents(sessionId:\"s-claude\", depth:1) { id sessionId } }"}`)
+	gotSessions1 := map[string]int{}
+	for _, e := range r1.Data.LinkedEvents {
+		gotSessions1[e.SessionID]++
+	}
+	if gotSessions1["s-claude"] != 3 || gotSessions1["s-git"] != 1 {
+		t.Errorf("depth=1 sessions = %v, want s-claude:3 + s-git:1", gotSessions1)
+	}
+
+	// Out-of-range depth is clamped to [0, 3]; depth=99 should not
+	// blow up and should return at least the depth=1 surface.
+	rBig := post(t, `{"query":"{ linkedEvents(sessionId:\"s-claude\", depth:99) { id sessionId } }"}`)
+	if len(rBig.Data.LinkedEvents) < len(r1.Data.LinkedEvents) {
+		t.Errorf("depth=99 returned fewer events (%d) than depth=1 (%d)", len(rBig.Data.LinkedEvents), len(r1.Data.LinkedEvents))
+	}
+}
+
+// TestLinkedEventsResolver_LinkPastLimit is the regression that drove
+// the switch from per-event link discovery to LinksForSession. With
+// 100 leading no-link events and the link-bearing event at index 100,
+// a perSessionLimit=10 read fetches only the first 10 events; if BFS
+// only walks links of fetched events, it never sees the link and the
+// neighbouring session is invisible. With LinksForSession, the link
+// is discovered regardless of which events were paged in.
+func TestLinkedEventsResolver_LinkPastLimit(t *testing.T) {
+	st := store.NewMemory()
+	ctx := context.Background()
+
+	for i := 0; i < 100; i++ {
+		if err := st.AppendEvent(ctx, &store.Event{
+			ID: fmt.Sprintf("e-noise-%03d", i), SessionID: "s-big",
+			ActorType: "agent", ActorID: "claude-code",
+			Kind: "tool_call", Hash: fmt.Sprintf("h-noise-%03d", i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The link-bearing event sits at the far end.
+	if err := st.AppendEvent(ctx, &store.Event{
+		ID: "e-link-bearer", SessionID: "s-big",
+		ActorType: "agent", ActorID: "claude-code",
+		Kind: "tool_result", Hash: "h-link-bearer",
+		Refs: []string{"git:xyz"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendEvent(ctx, &store.Event{
+		ID: "e-peer", SessionID: "s-peer",
+		ActorType: "human", ActorID: "alice",
+		Kind: "commit", Hash: "h-peer", Refs: []string{"git:xyz"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendLink(ctx, &store.Link{
+		FromEvent: "e-link-bearer", ToEvent: "e-peer",
+		Relation: "references", Confidence: 1.0, InferredBy: "shared_ref:git:xyz",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(query.NewRouter(st))
+	defer srv.Close()
+
+	body := `{"query":"{ linkedEvents(sessionId:\"s-big\", depth:1, perSessionLimit:10) { sessionId } }"}`
+	resp, err := http.Post(srv.URL+"/graphql", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	var got struct {
+		Data struct {
+			LinkedEvents []struct {
+				SessionID string `json:"sessionId"`
+			} `json:"linkedEvents"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	hasPeer := false
+	for _, e := range got.Data.LinkedEvents {
+		if e.SessionID == "s-peer" {
+			hasPeer = true
+			break
+		}
+	}
+	if !hasPeer {
+		t.Errorf("expected s-peer events in result; LinksForSession should have surfaced the link despite limit=10 (got sessions=%v)", got.Data.LinkedEvents)
 	}
 }

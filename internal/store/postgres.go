@@ -203,6 +203,28 @@ func (p *Postgres) LinksForEvent(ctx context.Context, eventID string) ([]*Link, 
 	return out, rows.Err()
 }
 
+func (p *Postgres) LinksForSession(ctx context.Context, sessionID string) ([]*Link, error) {
+	const q = `SELECT from_event, to_event, relation, confidence, inferred_by
+		FROM links
+		WHERE from_event IN (SELECT id FROM events WHERE session_id = $1)
+		   OR to_event   IN (SELECT id FROM events WHERE session_id = $1)
+		ORDER BY relation, from_event, to_event`
+	rows, err := p.pool.Query(ctx, q, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Link
+	for rows.Next() {
+		var l Link
+		if err := rows.Scan(&l.FromEvent, &l.ToEvent, &l.Relation, &l.Confidence, &l.InferredBy); err != nil {
+			return nil, err
+		}
+		out = append(out, &l)
+	}
+	return out, rows.Err()
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }

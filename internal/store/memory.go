@@ -166,3 +166,21 @@ func (m *Memory) LinksForEvent(_ context.Context, eventID string) ([]*Link, erro
 	}
 	return out, nil
 }
+
+func (m *Memory) LinksForSession(_ context.Context, sessionID string) ([]*Link, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Index event id → session id for O(1) endpoint lookup.
+	idToSession := make(map[string]string, len(m.events))
+	for _, e := range m.events {
+		idToSession[e.ID] = e.SessionID
+	}
+	var out []*Link
+	for _, l := range m.links {
+		if idToSession[l.FromEvent] == sessionID || idToSession[l.ToEvent] == sessionID {
+			cp := l
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}

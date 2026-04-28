@@ -8,6 +8,7 @@ package query
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/dongqiu/agent-lens/internal/store"
@@ -80,6 +81,80 @@ func (r *queryResolver) Sessions(ctx context.Context, limit *int, since *time.Ti
 	out := make([]*Session, 0, len(list))
 	for _, s := range list {
 		out = append(out, toGQLSession(s))
+	}
+	return out, nil
+}
+
+// LinkedEvents is the resolver for the linkedEvents field.
+//
+// BFS by session: start from sessionID, list its events, then expand
+// to any session reachable via links, repeating up to `depth` hops.
+//
+// Critical: link discovery uses Store.LinksForSession (full table
+// scan filtered by session) rather than walking links per fetched
+// event. The latter would cap discovery at perSessionLimit events,
+// silently missing links that live on events past that cap — exactly
+// what the dogfood data hit (the link-bearing tool_result was past
+// row 900 of a 1000-event session).
+func (r *queryResolver) LinkedEvents(ctx context.Context, sessionID string, depth *int, perSessionLimit *int) ([]*Event, error) {
+	d := 1
+	if depth != nil {
+		d = *depth
+	}
+	if d < 0 {
+		d = 0
+	}
+	if d > 3 {
+		d = 3
+	}
+
+	psl := 200
+	if perSessionLimit != nil {
+		psl = *perSessionLimit
+	}
+
+	visited := map[string]bool{sessionID: true}
+	frontier := []string{sessionID}
+	var collected []*store.Event
+
+	for level := 0; level <= d && len(frontier) > 0; level++ {
+		var nextFrontier []string
+		for _, sid := range frontier {
+			evs, err := r.Store.ListBySession(ctx, sid, psl)
+			if err != nil {
+				return nil, fmt.Errorf("ListBySession(%q): %w", sid, err)
+			}
+			collected = append(collected, evs...)
+
+			if level == d {
+				continue // last layer — don't expand further
+			}
+			links, err := r.Store.LinksForSession(ctx, sid)
+			if err != nil {
+				// Tolerate per-session link lookup failures — they'd
+				// only suppress neighbour discovery, not corrupt the
+				// already-collected events.
+				continue
+			}
+			for _, l := range links {
+				for _, otherID := range [2]string{l.FromEvent, l.ToEvent} {
+					other, err := r.Store.GetEvent(ctx, otherID)
+					if err != nil || other == nil {
+						continue
+					}
+					if !visited[other.SessionID] {
+						visited[other.SessionID] = true
+						nextFrontier = append(nextFrontier, other.SessionID)
+					}
+				}
+			}
+		}
+		frontier = nextFrontier
+	}
+
+	out := make([]*Event, 0, len(collected))
+	for _, se := range collected {
+		out = append(out, toGQLEvent(se))
 	}
 	return out, nil
 }

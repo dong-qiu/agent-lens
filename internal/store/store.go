@@ -75,5 +75,10 @@ type Store interface {
 	ListSessions(ctx context.Context, limit int, since time.Time) ([]*SessionSummary, error)
 	AppendLink(ctx context.Context, l *Link) error
 	LinksForEvent(ctx context.Context, eventID string) ([]*Link, error)
+	// LinksForSession returns every link with at least one endpoint
+	// in sessionID. Used by BFS-style queries that need to discover
+	// neighbouring sessions without paging through all events first
+	// (the link-bearing event may sit past any per-session limit).
+	LinksForSession(ctx context.Context, sessionID string) ([]*Link, error)
 	Close() error
 }

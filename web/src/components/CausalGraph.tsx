@@ -13,8 +13,13 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import dagre from "@dagrejs/dagre";
 
-import { gql, eventsQuery } from "../api/client";
-import type { Event, EventKind, EventsResponse } from "../types";
+import { gql, eventsQuery, linkedEventsQuery } from "../api/client";
+import type {
+  Event,
+  EventKind,
+  EventsResponse,
+  LinkedEventsResponse,
+} from "../types";
 import { styleFor } from "./kindStyle";
 
 // Hex colors mirroring the Tailwind 500-shade in kindStyle.ts. The
@@ -39,9 +44,7 @@ const MINIMAP_HEX: Record<EventKind, string> = {
 const NODE_W = 180;
 const NODE_H = 56;
 
-// Build the dagre layout for one session's worth of events. Returns a
-// position map keyed by event id (top-left corner, since ReactFlow
-// expects top-left while dagre returns center).
+// Build the dagre layout for one or more sessions' worth of events.
 function layoutPositions(
   events: Event[],
   edges: Array<{ source: string; target: string }>,
@@ -66,17 +69,31 @@ function layoutPositions(
   return out;
 }
 
-function buildGraph(events: Event[]): { nodes: Node[]; edges: Edge[] } {
+function shortenSessionId(sid: string): string {
+  if (sid.length <= 14) return sid;
+  // Anchor on the head ("git-…", "github-pr:…") or the tail (UUID).
+  if (sid.includes(":") || sid.startsWith("git-") || sid.startsWith("github-")) {
+    return sid.length > 22 ? sid.slice(0, 22) + "…" : sid;
+  }
+  return sid.slice(0, 8) + "…" + sid.slice(-4);
+}
+
+function buildGraph(
+  events: Event[],
+  anchorSessionID: string,
+): { nodes: Node[]; edges: Edge[] } {
   const hashToId: Record<string, string> = {};
+  const eventById: Record<string, Event> = {};
   for (const e of events) {
     if (e.hash) hashToId[e.hash] = e.id;
+    eventById[e.id] = e;
   }
 
   const edges: Edge[] = [];
   const seenLinkIds = new Set<string>();
 
   for (const e of events) {
-    // Explicit causal parents — the strongest semantic edge.
+    // Explicit causal parents — strongest semantic edge.
     for (const p of e.parents) {
       edges.push({
         id: `parent:${p}->${e.id}`,
@@ -87,9 +104,7 @@ function buildGraph(events: Event[]): { nodes: Node[]; edges: Edge[] } {
         style: { stroke: "#1f2937", strokeWidth: 2 },
       });
     }
-    // Hash chain — structural, not causal. Render lightly so it doesn't
-    // dominate. Skip if the predecessor isn't in the rendered set
-    // (graceful when limit truncates the head of the chain).
+    // Hash chain — structural; only render when both endpoints rendered.
     if (e.prevHash && hashToId[e.prevHash]) {
       edges.push({
         id: `chain:${e.id}`,
@@ -100,25 +115,39 @@ function buildGraph(events: Event[]): { nodes: Node[]; edges: Edge[] } {
         style: { stroke: "#9ca3af", strokeWidth: 1, strokeDasharray: "4 3" },
       });
     }
-    // Linker-inferred edges. event.links includes both inbound and
-    // outbound, so we'd see each edge twice if we didn't dedupe by a
-    // canonical key.
+    // Linker-inferred edges. event.links surfaces both inbound and
+    // outbound, so dedupe by canonical key. Cross-session links get
+    // emphasised because they're the whole point of this view.
     for (const l of e.links) {
       const key = `link:${l.fromEvent}->${l.toEvent}:${l.relation}`;
       if (seenLinkIds.has(key)) continue;
       seenLinkIds.add(key);
+      const fromEv = eventById[l.fromEvent];
+      const toEv = eventById[l.toEvent];
+      const isCrossSession =
+        fromEv && toEv && fromEv.sessionId !== toEv.sessionId;
       edges.push({
         id: key,
         source: l.fromEvent,
         target: l.toEvent,
         type: "smoothstep",
         label: l.relation,
-        labelStyle: { fontSize: 10, fill: "#4f46e5" },
+        labelStyle: {
+          fontSize: 10,
+          fill: isCrossSession ? "#9333ea" : "#4f46e5",
+          fontWeight: isCrossSession ? 600 : 400,
+        },
         labelBgPadding: [4, 2],
         labelBgBorderRadius: 4,
-        labelBgStyle: { fill: "#eef2ff" },
-        markerEnd: { type: MarkerType.Arrow, color: "#6366f1" },
-        style: { stroke: "#6366f1", strokeWidth: 1.5 },
+        labelBgStyle: { fill: isCrossSession ? "#f3e8ff" : "#eef2ff" },
+        markerEnd: {
+          type: MarkerType.Arrow,
+          color: isCrossSession ? "#9333ea" : "#6366f1",
+        },
+        style: {
+          stroke: isCrossSession ? "#9333ea" : "#6366f1",
+          strokeWidth: isCrossSession ? 2 : 1.5,
+        },
       });
     }
   }
@@ -128,20 +157,27 @@ function buildGraph(events: Event[]): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = events.map((e) => {
     const s = styleFor(e.kind);
     const idTail = e.id.length > 12 ? e.id.slice(-12) : e.id;
+    const isAnchor = e.sessionId === anchorSessionID;
     return {
       id: e.id,
       position: positions[e.id] ?? { x: 0, y: 0 },
-      // kind is plumbed into data so MiniMap can color minimap nodes
-      // by the same palette without re-deriving from the JSX label.
       data: {
         kind: e.kind,
         label: (
-          <div className={`flex h-full w-full flex-col gap-0.5 rounded border ${s.container} px-2 py-1`}>
+          <div
+            className={`flex h-full w-full flex-col gap-0.5 rounded border ${s.container} px-2 py-1 ${
+              isAnchor ? "" : "ring-2 ring-purple-300 ring-offset-1"
+            }`}
+          >
             <div className="flex items-center gap-1 text-[10px]">
               <span aria-hidden>{s.icon}</span>
-              <span className="font-medium uppercase tracking-wide">{s.label}</span>
+              <span className="font-medium uppercase tracking-wide">
+                {s.label}
+              </span>
             </div>
-            <div className="truncate font-mono text-[9px] text-zinc-500">{idTail}</div>
+            <div className="truncate font-mono text-[9px] text-zinc-500">
+              {isAnchor ? idTail : shortenSessionId(e.sessionId)}
+            </div>
           </div>
         ),
       },
@@ -159,10 +195,9 @@ function buildGraph(events: Event[]): { nodes: Node[]; edges: Edge[] } {
 }
 
 // Inner canvas — must live under <ReactFlowProvider> so useReactFlow()
-// can read/write the viewport. We use this primarily so MiniMap onClick
-// can pan the main canvas: pannable / zoomable on MiniMap depend on a
-// d3-zoom binding that has been observed to misfire under React 18
-// StrictMode, so onClick → setCenter is the reliable navigation path.
+// can read/write the viewport. MiniMap onClick → setCenter for
+// reliable navigation under React 18 StrictMode (d3-zoom path is
+// flaky there).
 function GraphCanvas({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
   const flow = useReactFlow();
   const onMiniMapClick = useCallback(
@@ -200,20 +235,43 @@ function GraphCanvas({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
   );
 }
 
-export function CausalGraph({ sessionId }: { sessionId: string }) {
-  // Same queryKey as Timeline: react-query dedupes the fetch and both
-  // views share the cache, so toggling Timeline ↔ Graph never re-fetches.
+export function CausalGraph({
+  sessionId,
+  linked,
+}: {
+  sessionId: string;
+  linked: boolean;
+}) {
+  // The two queries share queryKey so React Query treats them as the
+  // same cache cell. Switching the toggle invalidates and refetches
+  // because we change queryFn under the same key — but for v1 we
+  // accept that (a single `events` query that always returned cross-
+  // session is server-side-cheaper but loses the "single-session
+  // anchor" semantic the URL conveys).
   const { data, error, isLoading } = useQuery({
-    queryKey: ["events", sessionId],
-    queryFn: () => gql<EventsResponse>(eventsQuery, { sessionId, limit: 200 }),
+    queryKey: linked ? ["linkedEvents", sessionId] : ["events", sessionId],
+    queryFn: () =>
+      linked
+        ? gql<LinkedEventsResponse>(linkedEventsQuery, {
+            sessionId,
+            depth: 1,
+            perSessionLimit: 200,
+          }).then((d): Event[] => d.linkedEvents)
+        : gql<EventsResponse>(eventsQuery, { sessionId, limit: 200 }).then(
+            (d): Event[] => d.events,
+          ),
     enabled: sessionId.length > 0,
     refetchInterval: 2000,
   });
 
   const graph = useMemo(() => {
-    if (!data?.events?.length) return { nodes: [], edges: [] };
-    return buildGraph(data.events);
-  }, [data]);
+    if (!data?.length) return { nodes: [], edges: [], crossSessionCount: 0 };
+    const built = buildGraph(data, sessionId);
+    const crossSessionCount = data.filter(
+      (e) => e.sessionId !== sessionId,
+    ).length;
+    return { ...built, crossSessionCount };
+  }, [data, sessionId]);
 
   if (isLoading) return <div className="text-sm text-zinc-500">Loading…</div>;
   if (error) {
@@ -234,10 +292,27 @@ export function CausalGraph({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <div className="h-[calc(100vh-180px)] overflow-hidden rounded border border-zinc-200 bg-white">
-      <ReactFlowProvider>
-        <GraphCanvas nodes={graph.nodes} edges={graph.edges} />
-      </ReactFlowProvider>
+    <div>
+      {linked && (
+        <div className="mb-2 text-xs text-zinc-600">
+          Showing {data.length} events across linked sessions
+          {graph.crossSessionCount > 0 && (
+            <>
+              {" "}
+              ·{" "}
+              <span className="font-medium text-purple-700">
+                {graph.crossSessionCount} from neighbouring sessions
+              </span>
+            </>
+          )}
+          .
+        </div>
+      )}
+      <div className="h-[calc(100vh-200px)] overflow-hidden rounded border border-zinc-200 bg-white">
+        <ReactFlowProvider>
+          <GraphCanvas nodes={graph.nodes} edges={graph.edges} />
+        </ReactFlowProvider>
+      </div>
     </div>
   );
 }

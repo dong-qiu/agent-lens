@@ -53,3 +53,25 @@ export const eventsQuery = `
     sessionHead(sessionId: $sessionId)
   }
 `;
+
+// linkedEventsQuery returns events from sessionId plus events from
+// every session reachable via the linker's emitted links, up to depth
+// hops. Used by the cross-session causal graph view.
+export const linkedEventsQuery = `
+  query LinkedEvents($sessionId: String!, $depth: Int, $perSessionLimit: Int) {
+    linkedEvents(sessionId: $sessionId, depth: $depth, perSessionLimit: $perSessionLimit) {
+      id
+      ts
+      sessionId
+      turnId
+      actor { type id model }
+      kind
+      payload
+      parents
+      refs
+      hash
+      prevHash
+      links { fromEvent toEvent relation inferredBy }
+    }
+  }
+`;

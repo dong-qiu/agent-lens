@@ -77,4 +77,13 @@ type Query {
   are returned.
   """
   sessions(limit: Int = 50, since: Time): [Session!]!
+
+  """
+  Return events from sessionId plus events from any session reachable
+  via the linker's emitted `links` (transitively, up to `depth` hops).
+  Per-session result is capped at `perSessionLimit`. depth=0 is
+  equivalent to events(sessionId, perSessionLimit). depth is clamped
+  to [0, 3] server-side to bound query cost.
+  """
+  linkedEvents(sessionId: String!, depth: Int = 1, perSessionLimit: Int = 200): [Event!]!
 }
