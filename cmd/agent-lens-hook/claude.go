@@ -98,11 +98,22 @@ func makeToolCall(in *claudeHookInput) map[string]any {
 }
 
 func makeToolResult(in *claudeHookInput) map[string]any {
-	return baseEvent(in, agentActor(), "tool_result", map[string]any{
+	ev := baseEvent(in, agentActor(), "tool_result", map[string]any{
 		"name":     in.ToolName,
 		"input":    in.ToolInput,
 		"response": in.ToolResponse,
 	})
+	// Stitch this Claude session to the corresponding git-post-commit
+	// session by attaching the same `git:<full-sha>` ref the post-commit
+	// hook emits. Without this, the linker has no shared ref to match
+	// across the two sessions and the cross-stage chain has a hole at
+	// the prompt-to-commit edge. See issue #48.
+	if in.ToolName == "Bash" {
+		if refs := gitCommitRefsFromBash(in.ToolInput, in.ToolResponse, in.CWD); len(refs) > 0 {
+			ev["refs"] = refs
+		}
+	}
+	return ev
 }
 
 func makeSessionStart(in *claudeHookInput) map[string]any {
