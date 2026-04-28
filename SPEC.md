@@ -234,7 +234,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 - GitHub Actions 插件：build 事件 + 产物 hash。
 - Linking worker：基于 SHA / PR / branch 自动拼接。
 - 会话列表：GraphQL 增加 `sessions(limit, since)` 查询;Lens UI 新增会话列表页,替代 M1 手填 session id 的输入框。
-- **因果图视图(未完成)**:Lens UI 新增 ReactFlow graph 视图,与 timeline 并列;基于 linking worker 输出的 links 渲染 `PROMPT → THOUGHT → TOOL_CALL → COMMIT → PR → BUILD → DEPLOY` 的有向因果图。SPEC §16.1 已锁定 ReactFlow,M2 当前只交付了 timeline 视图,graph 视图待补。
+- **因果图视图(已交付,PR #42)**:Lens UI 在 timeline 之外新增 ReactFlow graph 视图,session 顶部 `Timeline / Graph` 切换,深链 `?view=graph`。三类边可视区分:hash chain(虚线灰)、`parents`(实线深)、linker links(实线靛蓝带 relation 标签)。MiniMap 提供长 chain 全局导航,通过 `useReactFlow + setCenter` 实现 click-to-center,绕开 React 18 StrictMode 下 d3-zoom 绑定的不可靠路径。
 
 ### M3（再 6–8 周）：可验证
 - Deploy webhook（K8s / Argo / 自定义）。
@@ -242,7 +242,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 - 哈希链校验 CLI：`agent-lens verify`。
 - 审计报告导出（PDF / JSON）。
 - M3 完成即激活 §17 自观测，把本仓库自身后续开发作为首个 dogfood。
-- **Monaco 代码/diff 视图(未完成)**:Lens UI 在 EventCard / Timeline 中渲染 CODE_CHANGE 事件的实际 diff,SPEC §16.1 已锁定 Monaco。审计场景下"看 agent 真正改了什么文件"是可验证性的最后一公里 —— 没有它,审计员只能看 payload JSON 里裸文本,无法直观比对前后。
+- **Monaco 代码/diff 视图(已交付,PR #44 + #46)**:`EventCard` 对 file-mutating TOOL_CALL(`Edit` / `Write` / `MultiEdit`)展示 sky 色 `diff ×N` pill,展开内嵌 Monaco DiffEditor。`payloadToDiff` 直接从已有 TOOL_CALL payload 派生 before/after,绕过"先发 CODE_CHANGE 事件"这个本来需要改 hook 的前置工作(若 hook 后续真补 CODE_CHANGE,EventCard 加 `kind === 'CODE_CHANGE'` 分支即可,迁移成本极小)。**Monaco 自托管打包**(PR #46):弃用 `@monaco-editor/react` 的 jsdelivr CDN 默认路径,把 monaco-editor + editor.worker 通过 Vite `?worker` 一并打到本地 chunk;`React.lazy` 让首屏不付成本(index 391 KB / 127 KB gzipped 不含 Monaco;Monaco 单独 lazy chunk 3.8 MB / 990 KB gzipped 仅在首次展开 diff 时拉)。**契合 §13 self-hosted / air-gap 调性**。
 
 ### M4：扩展
 - OpenCode 接入。
