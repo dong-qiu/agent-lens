@@ -229,10 +229,11 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 - Single-node Docker Compose 部署。
 
 ### M2（再 6–8 周）：跨阶段串联
-- GitHub App：PR 事件 + PR Review Bot。
+- GitHub App：PR 事件 + PR Review Bot(**已实现 inbound**:`internal/webhooks/github` 接收并入库 `pull_request` / `pull_request_review` / `push` / `workflow_run`。**outbound 方向(自动审 PR、回写 inline 评论)解读为 M2 范围外**,如要做需先单开 ADR 明确 scope 与 LLM 接入策略)。
 - GitHub Actions 插件：build 事件 + 产物 hash。
 - Linking worker：基于 SHA / PR / branch 自动拼接。
 - 会话列表：GraphQL 增加 `sessions(limit, since)` 查询;Lens UI 新增会话列表页,替代 M1 手填 session id 的输入框。
+- **因果图视图(未完成)**:Lens UI 新增 ReactFlow graph 视图,与 timeline 并列;基于 linking worker 输出的 links 渲染 `PROMPT → THOUGHT → TOOL_CALL → COMMIT → PR → BUILD → DEPLOY` 的有向因果图。SPEC §16.1 已锁定 ReactFlow,M2 当前只交付了 timeline 视图,graph 视图待补。
 
 ### M3（再 6–8 周）：可验证
 - Deploy webhook（K8s / Argo / 自定义）。
@@ -240,6 +241,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 - 哈希链校验 CLI：`agent-lens verify`。
 - 审计报告导出（PDF / JSON）。
 - M3 完成即激活 §17 自观测，把本仓库自身后续开发作为首个 dogfood。
+- **Monaco 代码/diff 视图(未完成)**:Lens UI 在 EventCard / Timeline 中渲染 CODE_CHANGE 事件的实际 diff,SPEC §16.1 已锁定 Monaco。审计场景下"看 agent 真正改了什么文件"是可验证性的最后一公里 —— 没有它,审计员只能看 payload JSON 里裸文本,无法直观比对前后。
 
 ### M4：扩展
 - OpenCode 接入。
