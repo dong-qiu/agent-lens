@@ -229,7 +229,8 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 - Single-node Docker Compose 部署。
 
 ### M2（再 6–8 周）：跨阶段串联
-- GitHub App：PR 事件 + PR Review Bot(**已实现 inbound**:`internal/webhooks/github` 接收并入库 `pull_request` / `pull_request_review` / `push` / `workflow_run`。**outbound 方向(自动审 PR、回写 inline 评论)解读为 M2 范围外**,如要做需先单开 ADR 明确 scope 与 LLM 接入策略)。
+- **GitHub Webhook ingest(已交付)**:`internal/webhooks/github` 接收并入库 `pull_request` / `pull_request_review` / `push` / `workflow_run` 这 4 类事件,挂上 `git:<sha>` ref 让 linking worker 跨 session 串联。对应 §8 架构图顶部的 "GitHub App" 入站箱。
+- **PR Review Bot — outbound(未交付)**:对应 §8 架构图下游消费者位置 + §9.2 流程 3("Evidence Summary"评论)的能力 —— 主动向 PR 回写评论 / status check / 链接 audit report。当前**没有任何 outbound 实现**(无 GitHub API 调用、无 LLM 接入、无判定逻辑)。功能边界(评论 vs 审 vs status check)、技术选型(LLM 自动审 vs 规则引擎 vs 仅附 audit-report 链接)、与 §13 self-hosted 调性的兼容方式(外部 LLM API 是否打破 air-gap 承诺)都未决。**需先单开 ADR-0003 才能动手**。
 - GitHub Actions 插件：build 事件 + 产物 hash。
 - Linking worker：基于 SHA / PR / branch 自动拼接。
 - 会话列表：GraphQL 增加 `sessions(limit, since)` 查询;Lens UI 新增会话列表页,替代 M1 手填 session id 的输入框。
