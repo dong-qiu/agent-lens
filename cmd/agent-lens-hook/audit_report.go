@@ -207,18 +207,24 @@ func verifyAuditReportCore(args []string, out io.Writer) error {
 	}
 
 	if len(res.Issues) > 0 {
-		fmt.Fprintf(out, "FAIL · %d issues\n", len(res.Issues))
+		if _, err := fmt.Fprintf(out, "FAIL · %d issues\n", len(res.Issues)); err != nil {
+			return err
+		}
 		for _, iss := range res.Issues {
-			fmt.Fprintf(out, "  - %s\n", iss)
+			if _, err := fmt.Fprintf(out, "  - %s\n", iss); err != nil {
+				return err
+			}
 		}
 		return &auditReportIssue{msg: fmt.Sprintf("%d issue(s) found", len(res.Issues))}
 	}
 
-	fmt.Fprintf(out,
+	if _, err := fmt.Fprintf(out,
 		"OK · version %s · %d sessions · %d events · attestations: %d verified, %d skipped\n",
 		r.Version, res.SessionsCount, res.EventsCount,
 		res.AttestationsVerified, res.AttestationsSkipped,
-	)
+	); err != nil {
+		return err
+	}
 	return nil
 }
 
