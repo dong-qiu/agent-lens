@@ -34,9 +34,10 @@ These were settled during initial scoping and are referenced throughout `SPEC.md
 The collector defaults to `AGENT_LENS_STORE=postgres`. To run the dogfood loop with data that survives restarts:
 
 ```bash
-# 1. Start Postgres + MinIO (only the services we actually use locally;
-#    the agent-lens compose service is for production-style runs and
-#    its Dockerfile lags behind go.mod, so skip it).
+# 1. Start Postgres + MinIO. (`make compose-up` also builds the
+#    agent-lens server image; for the local dogfood loop we want to run
+#    the collector via `go run` so we get hot rebuilds, so bring up only
+#    the data services.)
 docker compose -f deploy/compose/docker-compose.yml up -d postgres minio
 
 # 2. Apply migrations (requires `golang-migrate`; `brew install golang-migrate`).
