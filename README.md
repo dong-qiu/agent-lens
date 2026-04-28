@@ -276,6 +276,63 @@ webhook 路径（M2-C-1）只能拿到 GitHub 那边的 lifecycle，**没有 art
 
 详细文档见 [`actions/build/README.md`](./actions/build/README.md)，完整示例 [`examples/github-actions/build.yml`](./examples/github-actions/build.yml)。session_id 跟 webhook 对齐（`github-build:<owner>/<repo>/<run_id>`），两条腿事件汇入同一时间线。
 
+## §17 自观测（Dogfooding）
+
+M3 收尾后激活：本仓库自身的开发循环跑在 agent-lens 上——prompt / thinking / tool call / commit 全链路落库，串成"工具用自己审计自己"的证据链。激活是**强 opt-in**，不会动外部贡献者的 home dir，也不在 Claude Code 里产生噪声。
+
+### 一键激活
+
+```bash
+script/install-dogfood.sh
+```
+
+干三件事：
+
+1. `go install ./cmd/agent-lens-hook`，把 hook 二进制塞进 `$GOBIN`。
+2. 复制 `.claude/settings.example.json` → `.claude/settings.local.json`（gitignore 命中，per-developer），让 Claude Code 钩子开始转发到本机服务。
+3. 写 `.git/hooks/post-commit`（per-clone，不进 git），commit 时自动上报 kind=commit 事件。
+
+opt out：`rm .claude/settings.local.json .git/hooks/post-commit`。
+
+### 跑本机服务
+
+```bash
+# 内存模式：零依赖，事件随重启清空，适合试水
+AGENT_LENS_STORE=memory go run ./cmd/agent-lens
+
+# 持久模式：Postgres + MinIO（本仓库 deploy/compose 里有现成 compose stack）
+docker compose -f deploy/compose/docker-compose.yml up -d
+go run ./cmd/agent-lens
+```
+
+默认端口 `:8787`，hook 默认走 `http://localhost:8787`。改动用 `AGENT_LENS_ADDR` / `AGENT_LENS_URL`。
+
+### 验证证据链
+
+激活后跑几轮 Claude Code，然后：
+
+```bash
+# 列你的 Claude session（hook 会用 claude-code:<uuid> 作 session_id）
+curl -s -X POST -H "Content-Type: application/json" \
+  -d '{"query":"query { sessionHead(sessionId: \"claude-code:<uuid>\") }"}' \
+  http://localhost:8787/v1/graphql
+
+# 哈希链校验
+agent-lens-hook verify --session claude-code:<uuid>
+
+# 整条链路打成审计报告
+agent-lens-hook export audit-report --root <event-id> --out my-trace.json
+agent-lens-hook verify-audit-report my-trace.json
+```
+
+### 范围与限制
+
+- **服务挂了 ≠ 不上报**：transport 默认在 POST 失败时把 NDJSON 落到 `~/.agent-lens/sessions/<sid>.ndjson`（per-session append，0600）。这是 §13 离线/弱网兜底机制，不是"明示静默"——所以 opt-in 后即便没起 agent-lens 服务，hooks 仍会在 home dir 累积事件文件。要彻底停活：先 `rm .claude/settings.local.json .git/hooks/post-commit`，再 `rm -rf ~/.agent-lens/sessions`。
+- **不回填**：v1 自观测从激活日起算，激活前的 Claude Code 会话不导入。
+- **redaction**：thinking 文本里可能含未脱敏的代码片段；在 hook 出口处做的截断按 §12 默认走，敏感内容上链前请自行 review。
+- **GitHub webhook 回路**：要把 PR / push / workflow_run 也接进来，需要把本机服务通过隧道（ngrok / cloudflared）暴露到公网，再在 `dong-qiu/agent-lens` 仓库设置里挂 webhook。这一步 SPEC §17 没强制；按需做。
+- **Project 模型**：v0 没有"项目"抽象，session_id 前缀（`claude-code:` / `github-pr:` / `deploy:` ...）已经天然分隔。多项目共用一个 store 时再补 project 维度。
+
 ## 模块名
 
 `go.mod` 的 `github.com/dongqiu/agent-lens` 是占位。落定 GitHub 组织后用 `go mod edit -module <new>` 替换。

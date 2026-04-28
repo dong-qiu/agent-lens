@@ -1,0 +1,44 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": "agent-lens-hook claude", "timeout": 5}
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": "agent-lens-hook claude", "timeout": 5}
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": "agent-lens-hook claude", "timeout": 5}
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {"type": "command", "command": "agent-lens-hook claude", "timeout": 5}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": "agent-lens-hook claude", "timeout": 30}
+        ]
+      }
+    ]
+  }
+}

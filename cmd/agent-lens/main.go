@@ -29,13 +29,30 @@ func main() {
 
 	addr := envOr("AGENT_LENS_ADDR", ":8787")
 	pgDSN := envOr("AGENT_LENS_PG_DSN", "postgres://agentlens:agentlens@localhost:5432/agentlens?sslmode=disable")
+	storeKind := envOr("AGENT_LENS_STORE", "postgres")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	st, err := store.OpenPostgres(ctx, pgDSN)
-	if err != nil {
-		slog.Error("open store", "err", err)
+	// AGENT_LENS_STORE=memory enables an in-process store for local
+	// dogfood / kicking the tyres without a Postgres dependency. Events
+	// vanish on restart — fine for §17 self-observation runs and demo
+	// flows, NOT a production option (no durability, no concurrent
+	// readers across processes).
+	var st store.Store
+	switch storeKind {
+	case "memory":
+		st = store.NewMemory()
+		slog.Info("store: memory (ephemeral; events lost on restart)")
+	case "postgres", "":
+		pg, err := store.OpenPostgres(ctx, pgDSN)
+		if err != nil {
+			slog.Error("open store", "err", err)
+			os.Exit(1)
+		}
+		st = pg
+	default:
+		slog.Error("unknown AGENT_LENS_STORE", "value", storeKind, "want", "postgres|memory")
 		os.Exit(1)
 	}
 	defer func() { _ = st.Close() }()
