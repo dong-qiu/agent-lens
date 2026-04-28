@@ -4,6 +4,7 @@ import ReactFlow, {
   Background,
   Controls,
   MarkerType,
+  MiniMap,
   type Edge,
   type Node,
 } from "reactflow";
@@ -11,8 +12,27 @@ import "reactflow/dist/style.css";
 import dagre from "@dagrejs/dagre";
 
 import { gql, eventsQuery } from "../api/client";
-import type { Event, EventsResponse } from "../types";
+import type { Event, EventKind, EventsResponse } from "../types";
 import { styleFor } from "./kindStyle";
+
+// Hex colors mirroring the Tailwind 500-shade in kindStyle.ts. The
+// MiniMap renders nodes with raw SVG fills, so we need real hex
+// strings rather than utility classes.
+const MINIMAP_HEX: Record<EventKind, string> = {
+  PROMPT: "#3b82f6",
+  THOUGHT: "#a855f7",
+  TOOL_CALL: "#f59e0b",
+  TOOL_RESULT: "#10b981",
+  CODE_CHANGE: "#0ea5e9",
+  COMMIT: "#52525b",
+  PR: "#d946ef",
+  TEST_RUN: "#14b8a6",
+  BUILD: "#f97316",
+  DEPLOY: "#ef4444",
+  REVIEW: "#6366f1",
+  DECISION: "#f43f5e",
+  PUSH: "#06b6d4",
+};
 
 const NODE_W = 180;
 const NODE_H = 56;
@@ -109,7 +129,10 @@ function buildGraph(events: Event[]): { nodes: Node[]; edges: Edge[] } {
     return {
       id: e.id,
       position: positions[e.id] ?? { x: 0, y: 0 },
+      // kind is plumbed into data so MiniMap can color minimap nodes
+      // by the same palette without re-deriving from the JSX label.
       data: {
+        kind: e.kind,
         label: (
           <div className={`flex h-full w-full flex-col gap-0.5 rounded border ${s.container} px-2 py-1`}>
             <div className="flex items-center gap-1 text-[10px]">
@@ -179,6 +202,22 @@ export function CausalGraph({ sessionId }: { sessionId: string }) {
       >
         <Background gap={16} size={1} color="#e4e4e7" />
         <Controls showInteractive={false} />
+        <MiniMap
+          pannable
+          zoomable
+          ariaLabel="Causal graph minimap"
+          nodeColor={(n) => {
+            const k = (n.data as { kind?: EventKind } | undefined)?.kind;
+            return (k && MINIMAP_HEX[k]) || "#a1a1aa";
+          }}
+          nodeStrokeWidth={0}
+          maskColor="rgba(255, 255, 255, 0.6)"
+          style={{
+            background: "#fafafa",
+            border: "1px solid #e4e4e7",
+            borderRadius: 4,
+          }}
+        />
       </ReactFlow>
     </div>
   );
