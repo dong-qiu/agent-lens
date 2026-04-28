@@ -30,3 +30,6 @@ web/vite.config.d.ts
 
 # Compose state
 deploy/compose/.data/
+
+# Backups
+/backups/
