@@ -53,6 +53,14 @@ enum EventKind {
   PUSH
 }
 
+"""Aggregated view of a session: id plus first/last activity and event count."""
+type Session {
+  id: String!
+  firstEventAt: Time!
+  lastEventAt: Time!
+  eventCount: Int!
+}
+
 type Query {
   """Look up a single event by ID."""
   event(id: ID!): Event
@@ -62,4 +70,11 @@ type Query {
 
   """Hash of the latest event in a session, or empty string if unknown."""
   sessionHead(sessionId: String!): String!
+
+  """
+  List sessions ordered by lastEventAt DESC (most recent first), up to
+  limit. If `since` is provided, only sessions with lastEventAt >= since
+  are returned.
+  """
+  sessions(limit: Int = 50, since: Time): [Session!]!
 }

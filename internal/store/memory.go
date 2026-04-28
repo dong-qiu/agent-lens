@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 )
@@ -87,6 +88,44 @@ func (m *Memory) HeadHash(_ context.Context, sessionID string) (string, error) {
 		}
 	}
 	return head, nil
+}
+
+func (m *Memory) ListSessions(_ context.Context, limit int, since time.Time) ([]*SessionSummary, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	agg := map[string]*SessionSummary{}
+	for _, e := range m.events {
+		s, ok := agg[e.SessionID]
+		if !ok {
+			s = &SessionSummary{ID: e.SessionID, FirstEventAt: e.TS, LastEventAt: e.TS}
+			agg[e.SessionID] = s
+		}
+		s.EventCount++
+		if e.TS.Before(s.FirstEventAt) {
+			s.FirstEventAt = e.TS
+		}
+		if e.TS.After(s.LastEventAt) {
+			s.LastEventAt = e.TS
+		}
+	}
+	out := make([]*SessionSummary, 0, len(agg))
+	for _, s := range agg {
+		if !since.IsZero() && s.LastEventAt.Before(since) {
+			continue
+		}
+		cp := *s
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].LastEventAt.Equal(out[j].LastEventAt) {
+			return out[i].LastEventAt.After(out[j].LastEventAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 func (m *Memory) EventsByRef(_ context.Context, ref string) ([]*Event, error) {

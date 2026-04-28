@@ -48,3 +48,14 @@ export type EventsResponse = {
   events: Event[];
   sessionHead: string;
 };
+
+export type Session = {
+  id: string;
+  firstEventAt: string;
+  lastEventAt: string;
+  eventCount: number;
+};
+
+export type SessionsResponse = {
+  sessions: Session[];
+};

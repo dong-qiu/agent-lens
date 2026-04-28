@@ -23,6 +23,17 @@ export async function gql<T>(
   return json.data;
 }
 
+export const sessionsQuery = `
+  query Sessions($limit: Int, $since: Time) {
+    sessions(limit: $limit, since: $since) {
+      id
+      firstEventAt
+      lastEventAt
+      eventCount
+    }
+  }
+`;
+
 export const eventsQuery = `
   query Events($sessionId: String!, $limit: Int) {
     events(sessionId: $sessionId, limit: $limit) {

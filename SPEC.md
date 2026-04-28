@@ -232,6 +232,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 - GitHub App：PR 事件 + PR Review Bot。
 - GitHub Actions 插件：build 事件 + 产物 hash。
 - Linking worker：基于 SHA / PR / branch 自动拼接。
+- 会话列表：GraphQL 增加 `sessions(limit, since)` 查询;Lens UI 新增会话列表页,替代 M1 手填 session id 的输入框。
 
 ### M3（再 6–8 周）：可验证
 - Deploy webhook（K8s / Argo / 自定义）。

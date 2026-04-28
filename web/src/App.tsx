@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Timeline } from "./components/Timeline";
+import { SessionList } from "./components/SessionList";
 
 function getInitialSession(): string {
   return new URLSearchParams(window.location.search).get("session") ?? "";
@@ -8,34 +9,60 @@ function getInitialSession(): string {
 export default function App() {
   const [sessionId, setSessionId] = useState<string>(getInitialSession);
 
+  // Browser back/forward replays whatever URL was last pushed; mirror
+  // it back into component state.
   useEffect(() => {
+    const onPop = () => setSessionId(getInitialSession());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // pushState (not replaceState) so each list↔timeline transition
+  // gets its own history entry — otherwise back skips out of the app.
+  const navigate = (next: string) => {
+    if (next === sessionId) return;
     const params = new URLSearchParams(window.location.search);
-    if (sessionId) params.set("session", sessionId);
+    if (next) params.set("session", next);
     else params.delete("session");
     const qs = params.toString();
     const url = `${window.location.pathname}${qs ? `?${qs}` : ""}`;
-    window.history.replaceState(null, "", url);
-  }, [sessionId]);
+    window.history.pushState(null, "", url);
+    setSessionId(next);
+  };
+
+  const subtitle = sessionId ? "M1 timeline" : "M2 sessions";
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
       <header className="border-b border-zinc-200 bg-white">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
-          <div>
-            <h1 className="text-xl font-semibold">Agent Lens</h1>
-            <p className="text-xs text-zinc-500">M1 timeline</p>
+          <div className="flex items-baseline gap-3">
+            <button
+              type="button"
+              onClick={() => navigate("")}
+              className="text-xl font-semibold hover:text-zinc-700"
+            >
+              Agent Lens
+            </button>
+            <p className="text-xs text-zinc-500">{subtitle}</p>
           </div>
-          <input
-            type="text"
-            placeholder="session id"
-            className="w-72 rounded border border-zinc-300 bg-white px-3 py-1.5 font-mono text-sm focus:border-zinc-500 focus:outline-none"
-            value={sessionId}
-            onChange={(e) => setSessionId(e.target.value)}
-          />
+          {sessionId && (
+            <button
+              type="button"
+              onClick={() => navigate("")}
+              className="text-xs text-zinc-500 underline-offset-2 hover:underline"
+            >
+              ← all sessions
+            </button>
+          )}
         </div>
       </header>
       <main className="mx-auto max-w-4xl px-6 py-6">
-        <Timeline sessionId={sessionId} />
+        {sessionId ? (
+          <Timeline sessionId={sessionId} />
+        ) : (
+          <SessionList onSelect={navigate} />
+        )}
       </main>
     </div>
   );

@@ -30,6 +30,16 @@ type Event struct {
 	Sig       []byte
 }
 
+// SessionSummary is an aggregated view of a single session: when it
+// began, when it last saw activity, and how many events it holds.
+// Used by the UI's session list page.
+type SessionSummary struct {
+	ID           string
+	FirstEventAt time.Time
+	LastEventAt  time.Time
+	EventCount   int
+}
+
 // Link is a causal or semantic relation between two events. Links are
 // stored separately from the append-only event log so they can be
 // re-derived without rewriting history.
@@ -59,6 +69,10 @@ type Store interface {
 	ListBySession(ctx context.Context, sessionID string, limit int) ([]*Event, error)
 	HeadHash(ctx context.Context, sessionID string) (string, error)
 	EventsByRef(ctx context.Context, ref string) ([]*Event, error)
+	// ListSessions returns session summaries ordered by LastEventAt DESC.
+	// limit <= 0 means "no limit". If since is non-zero, only sessions
+	// with LastEventAt >= since are returned.
+	ListSessions(ctx context.Context, limit int, since time.Time) ([]*SessionSummary, error)
 	AppendLink(ctx context.Context, l *Link) error
 	LinksForEvent(ctx context.Context, eventID string) ([]*Link, error)
 	Close() error

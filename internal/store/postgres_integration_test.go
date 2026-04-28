@@ -217,6 +217,69 @@ func openPostgresWithSchema(ctx context.Context, t *testing.T) (*Postgres, func(
 	}
 }
 
+// TestPostgresListSessions checks that ListSessions aggregates events
+// correctly and matches the Memory implementation's ordering: most
+// recently active session first, with eventCount and first/last
+// timestamps from MIN/MAX(ts). Also exercises the `since` filter.
+func TestPostgresListSessions(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := openPostgresWithSchema(ctx, t)
+	defer cleanup()
+
+	t0 := time.Now().UTC().Truncate(time.Microsecond)
+	mustAppend := func(id, sid string, ts time.Time) {
+		t.Helper()
+		if err := st.AppendEvent(ctx, &Event{
+			ID: id, SessionID: sid, TS: ts,
+			ActorType: "human", ActorID: "alice", Kind: "prompt", Hash: id,
+		}); err != nil {
+			t.Fatalf("append %s: %v", id, err)
+		}
+	}
+	mustAppend("01HSOLD1", "s-old", t0)
+	mustAppend("01HSMID1", "s-mid", t0.Add(1*time.Hour))
+	mustAppend("01HSMID2", "s-mid", t0.Add(2*time.Hour))
+	mustAppend("01HSNEW1", "s-new", t0.Add(5*time.Hour))
+
+	all, err := st.ListSessions(ctx, 0, time.Time{})
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("got %d sessions, want 3", len(all))
+	}
+	wantOrder := []string{"s-new", "s-mid", "s-old"}
+	for i, s := range all {
+		if s.ID != wantOrder[i] {
+			t.Errorf("sessions[%d].ID = %q, want %q", i, s.ID, wantOrder[i])
+		}
+	}
+	if all[1].EventCount != 2 {
+		t.Errorf("s-mid eventCount = %d, want 2", all[1].EventCount)
+	}
+	if !all[1].LastEventAt.Equal(t0.Add(2 * time.Hour)) {
+		t.Errorf("s-mid lastEventAt = %v, want %v", all[1].LastEventAt, t0.Add(2*time.Hour))
+	}
+
+	// since filter excludes s-old.
+	filtered, err := st.ListSessions(ctx, 0, t0.Add(30*time.Minute))
+	if err != nil {
+		t.Fatalf("ListSessions since: %v", err)
+	}
+	if len(filtered) != 2 {
+		t.Errorf("filtered len = %d, want 2", len(filtered))
+	}
+
+	// limit truncates from the front (most recent kept).
+	limited, err := st.ListSessions(ctx, 1, time.Time{})
+	if err != nil {
+		t.Fatalf("ListSessions limit: %v", err)
+	}
+	if len(limited) != 1 || limited[0].ID != "s-new" {
+		t.Errorf("limited = %+v, want [s-new]", limited)
+	}
+}
+
 // TestPostgresLinkRoundTrip exercises EventsByRef + AppendLink +
 // LinksForEvent end-to-end against the real GIN index added in 0002.
 func TestPostgresLinkRoundTrip(t *testing.T) {
