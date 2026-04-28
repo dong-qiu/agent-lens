@@ -228,3 +228,61 @@ func (f *flakyAppendStore) AppendLink(ctx context.Context, l *store.Link) error 
 	}
 	return f.Memory.AppendLink(ctx, l)
 }
+
+// TestProcessOnceRefinedRelation verifies that the linker emits a
+// SPEC §7 relation more specific than "references" when the kind
+// pair is recognised. Phase A's tool_result + commit case is the
+// most operationally important — that's what shows up in the live
+// dogfood whenever the agent runs `git commit`.
+func TestProcessOnceRefinedRelation(t *testing.T) {
+	cases := []struct {
+		name                  string
+		peerKind, newKind     string
+		wantRelation          string
+	}{
+		{"agent tool_result + commit → produces", "tool_result", "commit", RelationProduces},
+		{"commit + build → builds", "commit", "build", RelationBuilds},
+		{"commit + deploy → deploys", "commit", "deploy", RelationDeploys},
+		{"commit + review → reviews", "commit", "review", RelationReviews},
+		{"unknown pair falls back to references", "prompt", "thought", RelationReferences},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := store.NewMemory()
+			l := New(st, 0)
+			ctx := context.Background()
+
+			peer := &store.Event{
+				ID: "peer-" + tc.peerKind, TS: time.Now().UTC(),
+				SessionID: "s-peer", ActorType: "agent", ActorID: "claude-code",
+				Kind: tc.peerKind, Hash: "h-peer", Refs: []string{"git:abc"},
+			}
+			if err := st.AppendEvent(ctx, peer); err != nil {
+				t.Fatal(err)
+			}
+			newID := "new-" + tc.newKind
+			newEv := &store.Event{
+				ID: newID, TS: time.Now().UTC(),
+				SessionID: "s-new", ActorType: "human", ActorID: "alice",
+				Kind: tc.newKind, Hash: "h-new", Refs: []string{"git:abc"},
+			}
+			if err := st.AppendEvent(ctx, newEv); err != nil {
+				t.Fatal(err)
+			}
+			// The job carries the new event's kind so InferRelation has
+			// both kinds without an extra GetEvent.
+			if err := l.ProcessOnce(ctx, &ingest.WireEvent{
+				ID: newID, Kind: tc.newKind, Refs: []string{"git:abc"},
+			}); err != nil {
+				t.Fatalf("ProcessOnce: %v", err)
+			}
+			links, _ := st.LinksForEvent(ctx, newID)
+			if len(links) != 1 {
+				t.Fatalf("got %d links, want 1", len(links))
+			}
+			if links[0].Relation != tc.wantRelation {
+				t.Errorf("relation = %q, want %q", links[0].Relation, tc.wantRelation)
+			}
+		})
+	}
+}

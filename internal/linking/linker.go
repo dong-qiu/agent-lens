@@ -20,10 +20,10 @@ import (
 	"github.com/dongqiu/agent-lens/internal/store"
 )
 
-// DefaultRelation is the relation written for all v0 shared-ref links.
-// Refinement (commit→pr "produces", commit→build "builds", etc.)
-// belongs in M3.
-const DefaultRelation = "references"
+// DefaultRelation is the fallback when InferRelation has no specific
+// rule for the (kindA, kindB) pair. SPEC §7 vocabulary lives in
+// relation.go; the linker calls InferRelation per link.
+const DefaultRelation = RelationReferences
 
 // Linker is started once by the main process. Notify is safe to call
 // from any goroutine; Run owns the worker loop and exits on context
@@ -35,6 +35,7 @@ type Linker struct {
 
 type job struct {
 	eventID string
+	kind    string // event kind, used to refine the link's relation
 	refs    []string
 }
 
@@ -57,7 +58,7 @@ func (l *Linker) Notify(ev *ingest.WireEvent) {
 	if ev == nil || ev.ID == "" || len(ev.Refs) == 0 {
 		return
 	}
-	j := job{eventID: ev.ID, refs: append([]string(nil), ev.Refs...)}
+	j := job{eventID: ev.ID, kind: ev.Kind, refs: append([]string(nil), ev.Refs...)}
 	select {
 	case l.queue <- j:
 	default:
@@ -103,7 +104,7 @@ func (l *Linker) process(ctx context.Context, j job) error {
 			link := &store.Link{
 				FromEvent:  peer.ID,
 				ToEvent:    j.eventID,
-				Relation:   DefaultRelation,
+				Relation:   InferRelation(peer.Kind, j.kind),
 				Confidence: 1.0,
 				InferredBy: "shared_ref:" + ref,
 			}
@@ -125,5 +126,5 @@ func (l *Linker) ProcessOnce(ctx context.Context, ev *ingest.WireEvent) error {
 	if ev == nil || ev.ID == "" || len(ev.Refs) == 0 {
 		return nil
 	}
-	return l.process(ctx, job{eventID: ev.ID, refs: ev.Refs})
+	return l.process(ctx, job{eventID: ev.ID, kind: ev.Kind, refs: ev.Refs})
 }
