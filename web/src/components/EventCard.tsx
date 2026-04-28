@@ -1,13 +1,23 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Event } from "../types";
 import { styleFor, formatTimestamp } from "./kindStyle";
+import { DiffView, payloadToDiff } from "./DiffView";
 
 export function EventCard({ event }: { event: Event }) {
   const [open, setOpen] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
   const style = styleFor(event.kind);
 
   const summary = summarize(event);
   const hasPayload = event.payload && Object.keys(event.payload).length > 0;
+  const diffs = useMemo(
+    () =>
+      event.kind === "TOOL_CALL"
+        ? payloadToDiff(event.payload as Record<string, unknown> | null | undefined)
+        : [],
+    [event.kind, event.payload],
+  );
+  const expandable = hasPayload || diffs.length > 0;
 
   return (
     <div className={`rounded-lg border px-4 py-3 ${style.container}`}>
@@ -15,7 +25,7 @@ export function EventCard({ event }: { event: Event }) {
         type="button"
         className="flex w-full items-start justify-between gap-3 text-left"
         onClick={() => setOpen((o) => !o)}
-        disabled={!hasPayload}
+        disabled={!expandable}
       >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -32,6 +42,11 @@ export function EventCard({ event }: { event: Event }) {
               {event.actor.type.toLowerCase()} · {event.actor.id}
               {event.actor.model ? ` · ${event.actor.model}` : ""}
             </span>
+            {diffs.length > 0 && (
+              <span className="inline-flex items-center gap-0.5 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-900 ring-1 ring-sky-300">
+                ✎ diff{diffs.length > 1 ? ` ×${diffs.length}` : ""}
+              </span>
+            )}
             {event.links?.length > 0 && (
               <span
                 className="inline-flex items-center gap-0.5 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 ring-1 ring-zinc-300"
@@ -56,14 +71,39 @@ export function EventCard({ event }: { event: Event }) {
             {event.id} · hash {event.hash.slice(0, 12)}
           </div>
         </div>
-        {hasPayload && (
+        {expandable && (
           <span className="text-xs text-zinc-400 select-none mt-0.5 shrink-0">
             {open ? "▼" : "▶"}
           </span>
         )}
       </button>
 
-      {open && hasPayload && (
+      {open && diffs.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {diffs.map((slice, i) => (
+            <DiffView key={`${slice.filePath}:${i}`} slice={slice} />
+          ))}
+          {hasPayload && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowRaw((s) => !s);
+              }}
+              className="text-[11px] text-zinc-500 underline-offset-2 hover:underline"
+            >
+              {showRaw ? "Hide" : "Show"} raw payload
+            </button>
+          )}
+          {showRaw && hasPayload && (
+            <pre className="overflow-x-auto rounded border border-zinc-200 bg-white/70 p-2 text-[11px] text-zinc-800">
+              {JSON.stringify(event.payload, null, 2)}
+            </pre>
+          )}
+        </div>
+      )}
+
+      {open && diffs.length === 0 && hasPayload && (
         <pre className="mt-3 overflow-x-auto rounded border border-zinc-200 bg-white/70 p-2 text-[11px] text-zinc-800">
           {JSON.stringify(event.payload, null, 2)}
         </pre>
