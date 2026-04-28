@@ -36,14 +36,18 @@ echo "→ dumping to $out"
 pg_dump --dbname="$DSN" --format=custom --compress=9 --file="$out"
 
 # Record integrity hash so the restore step can spot bit-rot later.
+# Compute the digest with basename-only path so the sidecar survives
+# being moved to a different directory (e.g. the restore script copies
+# the dump into a tmpdir for round-trip verification).
 hash_cmd="$(command -v sha256sum || command -v shasum)"
 if [[ -z "$hash_cmd" ]]; then
   echo "warning: no sha256sum / shasum found; skipping integrity hash" >&2
 else
+  base="$(basename "$out")"
   if [[ "$hash_cmd" == *shasum ]]; then
-    "$hash_cmd" -a 256 "$out" > "$out.sha256"
+    (cd "$DEFAULT_DIR" && "$hash_cmd" -a 256 "$base") > "$out.sha256"
   else
-    "$hash_cmd" "$out" > "$out.sha256"
+    (cd "$DEFAULT_DIR" && "$hash_cmd" "$base") > "$out.sha256"
   fi
 fi
 

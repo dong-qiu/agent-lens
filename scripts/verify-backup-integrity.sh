@@ -103,9 +103,18 @@ trap cleanup EXIT
 echo "[1/4] dumping source database..."
 PG_DSN="$DSN" BACKUP_DIR="$tmpdir" \
   scripts/pg-backup.sh "$tmpdir" >/dev/null
-# pg-backup writes agentlens-<ts>.dump; our cleanup expects $dump
-mv "$tmpdir"/agentlens-*.dump "$dump"
-[[ -f "$tmpdir"/agentlens-*.dump.sha256 ]] && mv "$tmpdir"/agentlens-*.dump.sha256 "$dump.sha256"
+# pg-backup writes agentlens-<ts>.dump (+ .sha256 sidecar). Use a
+# nullglob-protected loop because [[ -f $glob ]] does NOT expand the
+# glob inside [[ ]] — the previous form silently lost the sidecar,
+# making the round-trip skip the integrity-hash code path entirely.
+shopt -s nullglob
+for f in "$tmpdir"/agentlens-*.dump; do
+  mv "$f" "$dump"
+done
+for f in "$tmpdir"/agentlens-*.dump.sha256; do
+  mv "$f" "$dump.sha256"
+done
+shopt -u nullglob
 
 echo "[2/4] restoring into transient database $restore_db..."
 admin_dsn="$(swap_db "$DSN" postgres)"
@@ -150,9 +159,15 @@ fi
 
 echo "[4/4] verifying hash chain for session $session_id..."
 verify_out="$tmpdir/verify.out"
+# Capture verify output to a file then echo it to the user. Avoid
+# `> >(tee ...)` — process substitution writes asynchronously, so the
+# subsequent grep can race tee's flush and miss "no events".
+set +e
 "$hook" verify --session "$session_id" --url "http://localhost:$PORT" --quiet \
-  > >(tee "$verify_out") 2>&1
+  > "$verify_out" 2>&1
 status=$?
+set -e
+cat "$verify_out"
 
 # verify exits 0 on "no events" too, which would let an empty restore
 # masquerade as a passing backup. Treat zero-event output as failure.

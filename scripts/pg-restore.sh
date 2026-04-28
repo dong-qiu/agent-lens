@@ -30,15 +30,22 @@ if [[ ! -r "$dump" ]]; then
 fi
 
 # Integrity check (best-effort — not all environments have sha256sum).
+# Compare hashes directly rather than `-c` so we don't care what path
+# the sidecar recorded (absolute / relative / basename — any survive).
 if [[ -f "$dump.sha256" ]]; then
   hash_cmd="$(command -v sha256sum || command -v shasum)"
   if [[ -n "$hash_cmd" ]]; then
-    echo "→ verifying $dump against $dump.sha256"
+    expected="$(awk '{print $1}' "$dump.sha256")"
     if [[ "$hash_cmd" == *shasum ]]; then
-      "$hash_cmd" -a 256 -c "$dump.sha256"
+      actual="$("$hash_cmd" -a 256 "$dump" | awk '{print $1}')"
     else
-      "$hash_cmd" -c "$dump.sha256"
+      actual="$("$hash_cmd" "$dump" | awk '{print $1}')"
     fi
+    if [[ -z "$expected" || "$expected" != "$actual" ]]; then
+      echo "sha256 mismatch: sidecar=$expected actual=$actual" >&2
+      exit 1
+    fi
+    echo "→ sha256 ok ($expected)"
   fi
 fi
 
@@ -50,9 +57,17 @@ fi
 # Refuse to clobber a non-empty target. Hash chain integrity hinges on
 # events being a single authoritative log; merging two restores would
 # produce a corrupted chain.
-existing_count="$(psql "$target_dsn" -tAc \
-  "SELECT COALESCE(SUM(n_live_tup), 0) FROM pg_stat_user_tables WHERE relname IN ('events','links','artifacts')" \
-  2>/dev/null || echo "0")"
+#
+# Use to_regclass + an actual COUNT against each table that exists.
+# pg_stat_user_tables.n_live_tup is a stats estimate that can lag bulk
+# inserts (or be 0 right after a restore before autovacuum runs), so
+# trusting it would let the safety gate slip past a freshly populated
+# target.
+count_sql="SELECT
+  COALESCE((CASE WHEN to_regclass('public.events')    IS NOT NULL THEN (SELECT COUNT(*) FROM events)    ELSE 0 END), 0)
++ COALESCE((CASE WHEN to_regclass('public.links')     IS NOT NULL THEN (SELECT COUNT(*) FROM links)     ELSE 0 END), 0)
++ COALESCE((CASE WHEN to_regclass('public.artifacts') IS NOT NULL THEN (SELECT COUNT(*) FROM artifacts) ELSE 0 END), 0)"
+existing_count="$(psql "$target_dsn" -tAc "$count_sql" 2>/dev/null || echo 0)"
 existing_count="$(echo "$existing_count" | tr -d '[:space:]')"
 if [[ -n "$existing_count" && "$existing_count" != "0" && "${TARGET_OVERWRITE:-}" != "1" ]]; then
   echo "target already contains $existing_count rows in events/links/artifacts." >&2
