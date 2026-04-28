@@ -103,6 +103,40 @@ func (p *Postgres) ListBySession(ctx context.Context, sessionID string, limit in
 	return out, rows.Err()
 }
 
+func (p *Postgres) EventsBeforeID(ctx context.Context, sessionID, eventID string, limit int) ([]*Event, error) {
+	if limit <= 0 {
+		limit = 1<<31 - 1
+	}
+	// Get the K closest predecessors (largest id < eventID), then
+	// reverse to id-asc so the caller can append into a chain in
+	// natural order.
+	const q = `
+		WITH window_events AS (
+			SELECT id, ts, session_id, turn_id, actor_type, actor_id, actor_model,
+			       kind, payload, parents, refs, hash, prev_hash, sig
+			FROM events
+			WHERE session_id = $1 AND id < $2
+			ORDER BY id DESC
+			LIMIT $3
+		)
+		SELECT * FROM window_events ORDER BY id ASC
+	`
+	rows, err := p.pool.Query(ctx, q, sessionID, eventID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Event
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) HeadHash(ctx context.Context, sessionID string) (string, error) {
 	// "Latest" = last-inserted, identified by max id (ULIDs are monotonic
 	// at insert). ts is hook wall-clock and can be skewed across concurrent

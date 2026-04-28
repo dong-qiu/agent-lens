@@ -121,21 +121,7 @@ func (r *queryResolver) LinkedEvents(ctx context.Context, sessionID string, dept
 	for level := 0; level <= d && len(frontier) > 0; level++ {
 		var nextFrontier []string
 		for _, sid := range frontier {
-			// Seed session ignores perSessionLimit. The user explicitly
-			// opened this session to investigate it; capping here means
-			// link-bearing events past psl are patched in (correct, see
-			// link-discovery comment below) but their chain neighbours
-			// aren't, so the prev_hash dashed line into the patched-in
-			// event has no source node and ReactFlow silently drops it
-			// — visually the link-bearer floats next to the peer's
-			// COMMIT with no chain connection back to the originating
-			// TOOL_CALL. Peer sessions still respect psl since they
-			// can be arbitrarily large and we don't need them whole.
-			limit := psl
-			if sid == sessionID {
-				limit = 0
-			}
-			evs, err := r.Store.ListBySession(ctx, sid, limit)
+			evs, err := r.Store.ListBySession(ctx, sid, psl)
 			if err != nil {
 				return nil, fmt.Errorf("ListBySession(%q): %w", sid, err)
 			}
@@ -169,10 +155,26 @@ func (r *queryResolver) LinkedEvents(ctx context.Context, sessionID string, dept
 					}
 					// Patch in this-session link endpoints that fell
 					// past psl, so cross-session edges always have
-					// both endpoints in the rendered set.
+					// both endpoints in the rendered set. Also fetch
+					// a small chain-context window before the bearer
+					// so the dashed prev_hash edge has a rendered
+					// source — without this the bearer floats with no
+					// chain connection back to the originating
+					// TOOL_CALL even though we successfully patched
+					// it in.
 					if other.SessionID == sid && !collectedIDs[other.ID] {
 						collectedIDs[other.ID] = true
 						collected = append(collected, other)
+						const chainContext = 10
+						preds, perr := r.Store.EventsBeforeID(ctx, sid, other.ID, chainContext)
+						if perr == nil {
+							for _, p := range preds {
+								if !collectedIDs[p.ID] {
+									collectedIDs[p.ID] = true
+									collected = append(collected, p)
+								}
+							}
+						}
 					}
 					if level < d && !visited[other.SessionID] {
 						visited[other.SessionID] = true

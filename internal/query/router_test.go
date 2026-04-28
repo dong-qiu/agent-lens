@@ -530,21 +530,19 @@ func TestLinkedEventsResolver_LinkBearerPastLimit_PatchedIn(t *testing.T) {
 	}
 }
 
-// TestLinkedEventsResolver_SeedSessionUnbounded is the regression for
-// the visual silent-degradation: when the link-bearing event in the
-// SEED session sits past perSessionLimit, the link-bearer itself is
-// patched in (covered by TestLinkedEventsResolver_LinkBearerPastLimit_PatchedIn)
-// but its chain neighbours (the matching TOOL_CALL one row earlier,
-// the next agent action one row later) aren't. The result is a
-// patched-in event with no rendered prev_hash predecessor → the
-// dashed chain edge has source=non-rendered → ReactFlow silently
-// drops it. Visually the link-bearer floats next to the peer's
+// TestLinkedEventsResolver_BearerChainContext is the regression for
+// the visual silent-degradation reported by the user: when the
+// link-bearing event in any session sits past perSessionLimit, the
+// bearer is patched in but its chain ancestors aren't, so the dashed
+// prev_hash edge into the bearer has source=non-rendered and
+// ReactFlow silently drops it — the bearer floats next to the peer
 // COMMIT with no chain connection back.
 //
-// Fix: seed session ignores perSessionLimit. The user explicitly
-// opened this session to investigate; the full chain is the audit
-// story.
-func TestLinkedEventsResolver_SeedSessionUnbounded(t *testing.T) {
+// Fix: for each patched-in bearer, also pull a small chain-context
+// window of predecessors via Store.EventsBeforeID. Seed session stays
+// bounded by perSessionLimit so the UI doesn't have to render
+// thousands of unrelated events when investigating a long session.
+func TestLinkedEventsResolver_BearerChainContext(t *testing.T) {
 	st := store.NewMemory()
 	ctx := context.Background()
 
@@ -612,8 +610,8 @@ func TestLinkedEventsResolver_SeedSessionUnbounded(t *testing.T) {
 
 	// Build hash → id map of returned events; the bearer's prev_hash
 	// must resolve to a rendered event so the dashed chain edge can
-	// land. With seed-unbounded all 51 anchor events come back; with
-	// seed capped at psl=10 only the first 10 come back and the
+	// land. With chain-context the bearer + its 10 predecessors are
+	// patched in; without it only first-psl events come back and the
 	// bearer's predecessor (h-anchor-049) is missing.
 	hashes := map[string]bool{}
 	var bearer *struct {
@@ -635,6 +633,13 @@ func TestLinkedEventsResolver_SeedSessionUnbounded(t *testing.T) {
 		t.Fatalf("e-anchor-bearer.prev_hash is null")
 	}
 	if !hashes[*bearer.PrevHash] {
-		t.Errorf("bearer's prev_hash %q is not in the rendered hash set; chain edge would be orphaned. Got %d events total — seed session should be unbounded so all 51 anchor events come back.", *bearer.PrevHash, len(got.Data.LinkedEvents))
+		t.Errorf("bearer's prev_hash %q is not in the rendered hash set; chain edge would be orphaned. Got %d events total — chain-context should pull predecessors via EventsBeforeID.", *bearer.PrevHash, len(got.Data.LinkedEvents))
+	}
+	// Sanity: total events should be bounded — chain context adds
+	// up to ~10 events per bearer, not the whole session. We have
+	// 51 anchor events; expect first-psl=10 + ~10 chain context +
+	// the bearer + 1 peer commit ≈ 22, NOT 52.
+	if len(got.Data.LinkedEvents) > 30 {
+		t.Errorf("expected chain-context to bound result (~22 events), got %d — looks like seed session was returned in full", len(got.Data.LinkedEvents))
 	}
 }
