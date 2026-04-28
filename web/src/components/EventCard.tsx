@@ -1,7 +1,13 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import type { Event } from "../types";
 import { styleFor, formatTimestamp } from "./kindStyle";
-import { DiffView, payloadToDiff } from "./DiffView";
+import { payloadToDiff } from "../lib/payloadToDiff";
+
+// React.lazy keeps the ~600 KB Monaco bundle out of the eager chunk:
+// users who never expand a diff never pay for it. The dynamic import
+// triggers Vite to emit Monaco as its own chunk loaded on first
+// expansion.
+const DiffView = lazy(() => import("./DiffView"));
 
 export function EventCard({ event }: { event: Event }) {
   const [open, setOpen] = useState(false);
@@ -80,9 +86,17 @@ export function EventCard({ event }: { event: Event }) {
 
       {open && diffs.length > 0 && (
         <div className="mt-3 space-y-2">
-          {diffs.map((slice, i) => (
-            <DiffView key={`${slice.filePath}:${i}`} slice={slice} />
-          ))}
+          <Suspense
+            fallback={
+              <div className="rounded border border-zinc-200 bg-white px-3 py-6 text-center text-xs text-zinc-500">
+                Loading diff editor…
+              </div>
+            }
+          >
+            {diffs.map((slice, i) => (
+              <DiffView key={`${slice.filePath}:${i}`} slice={slice} />
+            ))}
+          </Suspense>
           {hasPayload && (
             <button
               type="button"

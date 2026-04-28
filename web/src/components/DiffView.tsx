@@ -1,22 +1,39 @@
-import { DiffEditor } from "@monaco-editor/react";
+// Self-bundled Monaco. Importing this module loads ~600 KB gzipped of
+// Monaco core; keep it isolated and React.lazy it from the consumer
+// (EventCard) so the cost is only paid when a user actually expands a
+// diff. The CDN-loader fallback Monaco/react would otherwise use is
+// fully bypassed — see issue #45.
 
-export type DiffSlice = {
-  // Path is shown as a header above the editor and used to infer
-  // syntax highlighting language. Stays raw (absolute path is fine —
-  // basename is shown in the header for readability).
-  filePath: string;
-  before: string;
-  after: string;
-  // Optional caption (e.g. "edit 2 of 3" for MultiEdit), rendered next
-  // to the basename.
-  note?: string;
+// Vite's ?worker query bundles Monaco's editor worker into a separate
+// chunk we can construct on demand. We deliberately do NOT bundle the
+// language workers (typescript / json / css / html); DiffEditor uses
+// only Monarch tokenization, which lives in the editor module itself.
+import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
+
+// MonacoEnvironment must be set before any Monaco editor instance is
+// created. ES module imports are hoisted, but module *body* runs in
+// source order and before any consumer can render <DiffEditor>, so
+// this assignment is in time as long as nothing imports monaco-editor
+// before this module.
+type MonacoSelf = typeof self & {
+  MonacoEnvironment?: { getWorker: (workerId: string, label: string) => Worker };
+};
+(self as MonacoSelf).MonacoEnvironment = {
+  getWorker(_workerId, _label) {
+    return new EditorWorker();
+  },
 };
 
-// Minimal extension → Monaco language map. Falls back to plaintext for
-// anything not listed; the user still sees a clean diff, just without
-// syntax highlighting. We deliberately do not pull all of Monaco's
-// language registry — covering the languages this repo touches is
-// enough for the dogfood loop.
+import * as monaco from "monaco-editor";
+import { DiffEditor, loader } from "@monaco-editor/react";
+
+// Tell the React wrapper to use our bundled monaco instead of fetching
+// it from jsdelivr. Once configured, all subsequent <DiffEditor> /
+// <Editor> mounts use the local copy.
+loader.config({ monaco });
+
+import type { DiffSlice } from "../lib/payloadToDiff";
+
 const LANGUAGE_BY_EXT: Record<string, string> = {
   ts: "typescript",
   tsx: "typescript",
@@ -51,7 +68,7 @@ const LANGUAGE_BY_EXT: Record<string, string> = {
 
 function languageFor(filePath: string): string {
   const base = filePath.split("/").pop() ?? filePath;
-  if (LANGUAGE_BY_EXT[base]) return LANGUAGE_BY_EXT[base]; // exact basename match (e.g. Dockerfile)
+  if (LANGUAGE_BY_EXT[base]) return LANGUAGE_BY_EXT[base];
   const dot = base.lastIndexOf(".");
   if (dot < 0) return "plaintext";
   const ext = base.slice(dot + 1).toLowerCase();
@@ -64,14 +81,14 @@ function basename(filePath: string): string {
 
 // Heuristic editor height: every diff has at least header + a few
 // lines, but very large diffs get capped so a single Edit can't push
-// the timeline page kilometers tall. The user can still scroll inside
-// the editor when content exceeds the viewport.
+// the timeline page kilometers tall. Content scrolls inside the editor
+// when it exceeds the viewport.
 function heightFor(slice: DiffSlice): number {
   const lines = Math.max(
     slice.before.split("\n").length,
     slice.after.split("\n").length,
   );
-  const px = Math.min(Math.max(lines, 4), 30) * 19 + 24; // 19px line + padding
+  const px = Math.min(Math.max(lines, 4), 30) * 19 + 24;
   return px;
 }
 
@@ -119,56 +136,6 @@ export function DiffView({ slice }: { slice: DiffSlice }) {
   );
 }
 
-// Convert a TOOL_CALL payload into zero or more diff slices. Returns
-// [] for tools that aren't file mutators (so the EventCard can decide
-// whether to show the diff affordance with a single truthy check on
-// length). Defensive about unexpected payload shapes — we'd rather
-// return [] than throw and break Timeline rendering.
-export function payloadToDiff(
-  payload: Record<string, unknown> | null | undefined,
-): DiffSlice[] {
-  if (!payload) return [];
-  const name = typeof payload.name === "string" ? payload.name : "";
-  const input = (payload.input ?? {}) as Record<string, unknown>;
-  const filePath =
-    typeof input.file_path === "string" ? input.file_path : "";
-  if (!filePath) return [];
-
-  if (name === "Edit") {
-    const before = stringField(input.old_string);
-    const after = stringField(input.new_string);
-    if (before === null && after === null) return [];
-    return [{ filePath, before: before ?? "", after: after ?? "" }];
-  }
-  if (name === "Write") {
-    const after = stringField(input.content);
-    if (after === null) return [];
-    // Treat Write as a file creation: before is empty. Existing-file
-    // overwrites will display as full insert, which is technically
-    // correct but loses the implicit before — see issue #43 follow-ups.
-    return [{ filePath, before: "", after }];
-  }
-  if (name === "MultiEdit") {
-    const edits = Array.isArray(input.edits) ? input.edits : [];
-    const slices: DiffSlice[] = [];
-    edits.forEach((raw, i) => {
-      if (!raw || typeof raw !== "object") return;
-      const e = raw as Record<string, unknown>;
-      const before = stringField(e.old_string);
-      const after = stringField(e.new_string);
-      if (before === null && after === null) return;
-      slices.push({
-        filePath,
-        before: before ?? "",
-        after: after ?? "",
-        note: `edit ${i + 1} of ${edits.length}`,
-      });
-    });
-    return slices;
-  }
-  return [];
-}
-
-function stringField(v: unknown): string | null {
-  return typeof v === "string" ? v : null;
-}
+// Default export so EventCard can React.lazy this module — React.lazy
+// expects a function returning a module with a default export.
+export default DiffView;
