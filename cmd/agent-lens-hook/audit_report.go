@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -145,9 +146,11 @@ type auditReportIssue struct{ msg string }
 
 func (e *auditReportIssue) Error() string { return e.msg }
 
+// isAuditReportIssue uses errors.As so a wrapping `fmt.Errorf("...: %w", ...)`
+// in a future caller still surfaces the right exit code.
 func isAuditReportIssue(err error) bool {
-	_, ok := err.(*auditReportIssue)
-	return ok
+	var ari *auditReportIssue
+	return errors.As(err, &ari)
 }
 
 func verifyAuditReportCore(args []string, out io.Writer) error {
@@ -175,7 +178,7 @@ func verifyAuditReportCore(args []string, out io.Writer) error {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
 	var r audit.Report
-	if err := json.Unmarshal(raw, &r); err != nil {
+	if err := audit.DecodeReport(raw, &r); err != nil {
 		return fmt.Errorf("decode report: %w", err)
 	}
 

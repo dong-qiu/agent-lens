@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -10,6 +11,18 @@ import (
 
 	"github.com/dongqiu/agent-lens/internal/attest"
 )
+
+// DecodeReport unmarshals a report file with UseNumber so payload
+// integers stay as json.Number rather than float64 — that's what
+// Build wrote, and re-marshaling a float64 of a >2^53 integer would
+// drift bytes and surface as a spurious manifest mismatch. Use this
+// in preference to plain json.Unmarshal when reading a report off
+// disk.
+func DecodeReport(raw []byte, r *Report) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	return dec.Decode(r)
+}
 
 // VerifyOptions configures Verify. PubKey is optional — if nil, DSSE
 // envelope verification is skipped (the manifest + chain checks still

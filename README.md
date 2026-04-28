@@ -163,7 +163,7 @@ agent-lens-hook export audit-report \
   --out audit-report.json
 ```
 
-- `--root` 取一个 deploy / commit / pr / build event id；BFS 沿 `event.links` 把所有可达 session 拉进来（默认上限 50 session，靠 `--max-sessions` 调）。
+- `--root` 取一个 deploy / commit / pr / build event id；BFS 沿 `event.links` 把所有可达 session 拉进来（默认上限 50 session，靠 `--max-sessions` 调）。事件 id 的来源跟 deploy webhook 一节一致：客户端预生成的 `Idempotency-Key`（双用作 event id），或事后 `events(sessionId, limit)` 查 GraphQL 取第一个/最近一个事件。
 - `--attestation` 可重复，把 `.intoto.jsonl` 文件原样嵌入；记录 sha256，verifier 可以脱机比对。
 - 输出 JSON 顶层有 `manifest.{sessions_sha256, attestations_sha256}`，重命名 / 改字段 / 加事件 / 改 attestation 都会被 verifier 当场抓出来。
 

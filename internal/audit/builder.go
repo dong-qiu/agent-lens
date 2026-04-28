@@ -94,6 +94,16 @@ func Build(ctx context.Context, opts BuildOptions) (*Report, error) {
 		if err != nil {
 			return nil, fmt.Errorf("fetch session head %q: %w", sessionID, err)
 		}
+		// Truncation guard: if the GraphQL limit cap silently capped a
+		// long session, head won't match the last event we got. Same
+		// check covers a server contract drift where events come back
+		// out of ts ASC order. Either way, the report would be a lie
+		// — fail loudly.
+		if len(events) > 0 && head != "" && events[len(events)-1].Hash != head {
+			return nil, fmt.Errorf(
+				"session %q: server head_hash %s != last event hash %s — events truncated by GraphQL limit, or returned out of order",
+				sessionID, head, events[len(events)-1].Hash)
+		}
 		sessions = append(sessions, Session{
 			SessionID: sessionID,
 			HeadHash:  head,
