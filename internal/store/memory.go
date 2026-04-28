@@ -65,15 +65,15 @@ func (m *Memory) ListBySession(_ context.Context, sessionID string, limit int) (
 	return out, nil
 }
 
-// HeadHash returns the hash of the latest event for sessionID, where
-// "latest" matches Postgres's `ORDER BY ts DESC, id DESC LIMIT 1`:
-// max ts wins, ULID lexical max breaks ties. This keeps the two impls
-// in lockstep when clients send out-of-order timestamps.
+// HeadHash returns the hash of the last-appended event for sessionID,
+// identified by max id (ULIDs are monotonic at insert) — matches
+// Postgres's `ORDER BY id DESC LIMIT 1`. ts is set on the hook's wall
+// clock and can be skewed across concurrent hooks, so it cannot be used
+// to identify the head. See issue #38.
 func (m *Memory) HeadHash(_ context.Context, sessionID string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var (
-		maxTS time.Time
 		maxID string
 		head  string
 	)
@@ -81,8 +81,7 @@ func (m *Memory) HeadHash(_ context.Context, sessionID string) (string, error) {
 		if e.SessionID != sessionID {
 			continue
 		}
-		if e.TS.After(maxTS) || (e.TS.Equal(maxTS) && e.ID > maxID) {
-			maxTS = e.TS
+		if e.ID > maxID {
 			maxID = e.ID
 			head = e.Hash
 		}
