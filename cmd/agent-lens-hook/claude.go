@@ -91,10 +91,47 @@ func makePrompt(in *claudeHookInput) map[string]any {
 }
 
 func makeToolCall(in *claudeHookInput) map[string]any {
-	return baseEvent(in, agentActor(), "tool_call", map[string]any{
+	payload := map[string]any{
 		"name":  in.ToolName,
 		"input": in.ToolInput,
-	})
+	}
+	// Authorization context: which allowlist rule matched (if any),
+	// and any high-risk patterns detected in the input. PreToolUse
+	// only fires after Claude Code has granted permission, so this
+	// classifies the *path* by which permission was granted:
+	//   allowlist_match != "" → auto-allowed by policy
+	//   allowlist_match == "" → user must have approved interactively
+	// risk_signals flags audit-relevant patterns regardless of path.
+	auth := map[string]any{
+		"risk_signals": detectRiskSignalsOrEmpty(in.ToolName, in.ToolInput),
+	}
+	if perms := loadPermissionsSnapshot(in.CWD); perms != nil {
+		if allowAny, ok := perms["allow"].([]any); ok {
+			allow := make([]string, 0, len(allowAny))
+			for _, e := range allowAny {
+				if s, ok := e.(string); ok {
+					allow = append(allow, s)
+				}
+			}
+			primary := extractPrimaryArg(in.ToolName, in.ToolInput)
+			if match := matchAllowlist(in.ToolName, primary, allow); match != "" {
+				auth["allowlist_match"] = match
+			}
+		}
+	}
+	payload["authorization"] = auth
+	return baseEvent(in, agentActor(), "tool_call", payload)
+}
+
+// detectRiskSignalsOrEmpty wraps detectRiskSignals so the authorization
+// payload always carries a present-but-possibly-empty array (rather
+// than null), which is friendlier for downstream UI / SQL filtering.
+func detectRiskSignalsOrEmpty(toolName string, toolInput json.RawMessage) []string {
+	out := detectRiskSignals(toolName, toolInput)
+	if out == nil {
+		return []string{}
+	}
+	return out
 }
 
 func makeToolResult(in *claudeHookInput) map[string]any {
@@ -117,10 +154,18 @@ func makeToolResult(in *claudeHookInput) map[string]any {
 }
 
 func makeSessionStart(in *claudeHookInput) map[string]any {
-	return baseEvent(in, map[string]any{"type": "system", "id": "claude-code"}, "decision", map[string]any{
+	payload := map[string]any{
 		"marker": "session_start",
 		"cwd":    in.CWD,
-	})
+	}
+	// Capture the project-local Claude Code permission policy in
+	// effect for this session so audit reports can answer "what
+	// authorization rules were running at the time?". Absent settings
+	// is fine — the field is just omitted.
+	if perms := loadPermissionsSnapshot(in.CWD); perms != nil {
+		payload["permissions"] = perms
+	}
+	return baseEvent(in, map[string]any{"type": "system", "id": "claude-code"}, "decision", payload)
 }
 
 // makeStopEvents reads the transcript for the just-completed turn and
