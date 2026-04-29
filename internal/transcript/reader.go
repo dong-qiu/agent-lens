@@ -16,11 +16,20 @@ import (
 )
 
 // Block is a single content block extracted from one assistant message.
+//
+// RedactedThinking carries a per-message count of `thinking` content
+// blocks Claude Code wrote to the transcript with an empty `thinking`
+// field (only the `signature` was preserved). The count is attached to
+// the first `text` block of the same message so the derived
+// `assistant_message` DECISION event can surface it; thinking blocks
+// themselves do not carry the count to avoid mis-attributing the
+// redaction signal to the THOUGHT event.
 type Block struct {
-	Kind      string // "thinking" or "text"
-	Content   string
-	MessageID string
-	Model     string
+	Kind             string // "thinking" or "text"
+	Content          string
+	MessageID        string
+	Model            string
+	RedactedThinking int
 }
 
 // Reader reads new content from a transcript file since the last
@@ -143,11 +152,20 @@ func parseLine(line []byte) []Block {
 	if err := json.Unmarshal(msg.Content, &blocks); err != nil {
 		return nil
 	}
-	var out []Block
+	var (
+		out              []Block
+		redactedThinking int
+	)
 	for _, b := range blocks {
 		switch b.Type {
 		case "thinking":
 			if b.Thinking == "" {
+				// Claude Code persists `signature` but drops the
+				// thinking content; remember that the redaction
+				// happened so audit reports can say "N blocks
+				// redacted by Claude Code" instead of silently
+				// looking like the model didn't think at all.
+				redactedThinking++
 				continue
 			}
 			out = append(out, Block{Kind: "thinking", Content: b.Thinking, MessageID: msg.ID, Model: msg.Model})
@@ -156,6 +174,29 @@ func parseLine(line []byte) []Block {
 				continue
 			}
 			out = append(out, Block{Kind: "text", Content: b.Text, MessageID: msg.ID, Model: msg.Model})
+		}
+	}
+	if redactedThinking > 0 {
+		// Attach the count to the first text block so the
+		// `assistant_message` DECISION carries it. If the message had
+		// only redacted thinking (no text), emit a stub text block
+		// so the DECISION still fires; downstream UI shows just the
+		// "redacted" pill in that case.
+		attached := false
+		for i := range out {
+			if out[i].Kind == "text" {
+				out[i].RedactedThinking = redactedThinking
+				attached = true
+				break
+			}
+		}
+		if !attached {
+			out = append(out, Block{
+				Kind:             "text",
+				MessageID:        msg.ID,
+				Model:            msg.Model,
+				RedactedThinking: redactedThinking,
+			})
 		}
 	}
 	return out

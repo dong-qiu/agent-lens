@@ -177,6 +177,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 **已知局限**：
 - Claude Code transcript jsonl 不是公开稳定契约，解析按 fail-soft：未识别行跳过，不中断流。最低支持版本随发版迭代标注于 README。
 - `<synthetic>` 模型标记的消息（Claude Code 自身注入的 stop-sequence 占位，usage 全 0）按已知形态跳过 usage 提取，不报错、不丢消息体。
+- **思考内容（thinking 文本）**：Claude Code 写 transcript 时只保留 `signature` 字段，**原文不持久化**。§10.1 拿不到原文。每条 assistant 消息中被丢弃的 thinking 块**数量**显式记录在派生 DECISION 事件的 `payload.thinking_redacted_by_claude_code`，避免审计报告把"被吞"误读为"无思考"。要拿原文得走 §10.4。
 - 仍**没有**的能力：实时拦截 / token 流式即时反馈 / policy gate。要这些得走 §10.4。
 
 ### 10.4 代理深模式（M4+，未启用）
