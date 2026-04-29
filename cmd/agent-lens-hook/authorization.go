@@ -152,12 +152,18 @@ type bashRiskRule struct {
 // of token so that `echo "rm -rf x"` doesn't false-positive (the
 // echo'd token isn't at start-of-segment).
 var bashRiskRules = []bashRiskRule{
-	// Match rm -rf (or -fr / -R...f variants) at the start of a
-	// shell segment. Allow any chain of command-modifier prefixes
-	// (sudo / nice / time / env / exec) before `rm` so e.g.
-	// `sudo rm -rf …` still fires.
-	{"rm_rf", regexp.MustCompile(`(?:^|[;&|\n]\s*)(?:(?:sudo|nice|time|env|exec)\s+)*rm\s+(?:-[a-zA-Z]*[rR][a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*[rR]|--recursive\b\s*--force|--force\b\s*--recursive)\b`)},
-	{"force_push", regexp.MustCompile(`(?:^|[;&|\n]\s*)git\s+push\s+(?:[^|;&]*\s+)?(?:--force\b|-f\b)`)},
+	// Match rm with both -r/-R and -f flags at the start of a shell
+	// segment, in either order, with any additional flags interleaved
+	// (e.g. -rfv, -Rfd). Allow command-modifier prefixes
+	// (sudo / nice / time / env / exec) so e.g. `sudo rm -rf …`
+	// still fires.
+	{"rm_rf", regexp.MustCompile(`(?:^|[;&|\n]\s*)(?:(?:sudo|nice|time|env|exec)\s+)*rm\s+(?:-[a-zA-Z]*[rR][a-zA-Z]*[fF][a-zA-Z]*|-[a-zA-Z]*[fF][a-zA-Z]*[rR][a-zA-Z]*|--recursive\b\s*--force|--force\b\s*--recursive)\b`)},
+	// `git push --force` / `-f` but NOT `--force-with-lease` (the
+	// safe variant, which is increasingly the recommended workflow).
+	// Anchor the flag terminator on whitespace / `=` / end-of-string
+	// so `--force-with-lease=foo` doesn't false-positive on `\b`
+	// (which matches between `e` and `-`).
+	{"force_push", regexp.MustCompile(`(?:^|[;&|\n]\s*)git\s+push\s+(?:[^|;&\n]*\s+)?(?:--force(?:[\s=]|$)|-f(?:\s|$))`)},
 	{"sudo", regexp.MustCompile(`(?:^|[;&|\n]\s*)sudo\b`)},
 	{"chmod_777", regexp.MustCompile(`(?:^|[;&|\n]\s*)chmod\s+(?:-[a-zA-Z]+\s+)?777\b`)},
 	{"eval_dynamic", regexp.MustCompile(`(?:^|[;&|\n]\s*)eval\s+["'$]`)},
