@@ -53,6 +53,18 @@ export function EventCard({ event }: { event: Event }) {
                 ✎ diff{diffs.length > 1 ? ` ×${diffs.length}` : ""}
               </span>
             )}
+            {(() => {
+              const badge = authorizationBadge(event);
+              return badge ? (
+                <span
+                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ${badge.cls}`}
+                  title={badge.title}
+                >
+                  <span>{badge.icon}</span>
+                  <span>{badge.label}</span>
+                </span>
+              ) : null;
+            })()}
             {event.links?.length > 0 && (
               <span
                 className="inline-flex items-center gap-0.5 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 ring-1 ring-zinc-300"
@@ -212,4 +224,54 @@ function asString(v: unknown): string {
 
 function clip(s: string, n = 280): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+// authorizationBadge classifies a TOOL_CALL by the authorization
+// context the hook attached at PreToolUse:
+//   allowlist_match != null          → auto-allowed by policy (green)
+//   allowlist_match == null + risk   → user-approved a risky call (red)
+//   allowlist_match == null + clean  → user-approved interactively (yellow)
+// PreToolUse only fires after Claude Code has granted permission, so a
+// missing allowlist match means the user must have clicked yes in the
+// permission UI; that's the audit-worthy event security cares about.
+type Badge = { icon: string; label: string; cls: string; title: string };
+function authorizationBadge(event: Event): Badge | null {
+  if (event.kind !== "TOOL_CALL") return null;
+  const p = (event.payload ?? {}) as Record<string, unknown>;
+  const auth = p.authorization as
+    | {
+        allowlist_match?: string;
+        risk_signals?: string[];
+      }
+    | undefined;
+  if (!auth) return null;
+  const matched = !!auth.allowlist_match;
+  const risks = auth.risk_signals ?? [];
+  if (matched && risks.length === 0) {
+    return {
+      icon: "🟢",
+      label: "auto",
+      cls: "bg-emerald-50 text-emerald-900 ring-emerald-200",
+      title: `auto-allowed by:\n${auth.allowlist_match}`,
+    };
+  }
+  if (!matched && risks.length === 0) {
+    return {
+      icon: "🟡",
+      label: "user",
+      cls: "bg-amber-50 text-amber-900 ring-amber-200",
+      title: "no allowlist rule matched — user approved interactively",
+    };
+  }
+  // !matched + risks (or matched+risks; treat any risk as red).
+  return {
+    icon: "🔴",
+    label: `risky · ${matched ? "auto" : "user"}`,
+    cls: "bg-rose-50 text-rose-900 ring-rose-300",
+    title:
+      `risk signals: ${risks.join(", ") || "(none)"}\n` +
+      (matched
+        ? `auto-allowed by: ${auth.allowlist_match}`
+        : "no allowlist rule matched — user approved interactively"),
+  };
 }
