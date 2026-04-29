@@ -165,7 +165,11 @@ var bashRiskRules = []bashRiskRule{
 	// (which matches between `e` and `-`).
 	{"force_push", regexp.MustCompile(`(?:^|[;&|\n]\s*)git\s+push\s+(?:[^|;&\n]*\s+)?(?:--force(?:[\s=]|$)|-f(?:\s|$))`)},
 	{"sudo", regexp.MustCompile(`(?:^|[;&|\n]\s*)sudo\b`)},
-	{"chmod_777", regexp.MustCompile(`(?:^|[;&|\n]\s*)chmod\s+(?:-[a-zA-Z]+\s+)?777\b`)},
+	// chmod with mode containing 777 in the last three octal digits.
+	// Covers `chmod 777`, leading-zero `chmod 0777`, and special-bit
+	// prefixes (`chmod 4777` setuid+777, `chmod 7777` setuid+setgid+
+	// sticky+777). Earlier `777\b` only matched the bare 3-digit form.
+	{"chmod_777", regexp.MustCompile(`(?:^|[;&|\n]\s*)chmod\s+(?:-[a-zA-Z]+\s+)?[0-7]?777\b`)},
 	{"eval_dynamic", regexp.MustCompile(`(?:^|[;&|\n]\s*)eval\s+["'$]`)},
 	{"creds_in_url", regexp.MustCompile(`https?://[^/\s:@]+:[^/\s@]+@`)},
 	{"secret_env_inline", regexp.MustCompile(`\b[A-Z_]+_(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD)=[^\s'"]+`)},
