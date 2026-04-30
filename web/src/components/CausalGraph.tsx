@@ -78,26 +78,26 @@ function shortenSessionId(sid: string): string {
   return sid.slice(0, 8) + "…" + sid.slice(-4);
 }
 
-// GraphNodeLabel renders one node's interior. The hover tooltip is NOT
-// rendered here — ReactFlow's d3-zoom path uses setPointerCapture, which
-// suppresses React's onMouseEnter on descendant elements, so per-node
-// hover state never flips. The canonical fix is to use ReactFlow's own
-// `onNodeMouseEnter` / `onNodeMouseLeave` callbacks, which the library
-// fires before pointer capture; that lives one level up in GraphCanvas.
+// GraphNodeLabel renders one node's interior — pure presentation, no
+// hover state. We observed empirically that React onMouseEnter on
+// descendants of a ReactFlow node does NOT fire reliably (likely because
+// the library wraps each node with its own pointer/d3-zoom handlers);
+// the working fix is to use ReactFlow's own `onNodeMouseEnter` /
+// `onNodeMouseLeave` props, which live one level up in GraphCanvas.
 function GraphNodeLabel({
-  event,
+  kind,
   isAnchor,
   caption,
   captionMono,
   containerCls,
 }: {
-  event: Event;
+  kind: EventKind;
   isAnchor: boolean;
   caption: string;
   captionMono: boolean;
   containerCls: string;
 }) {
-  const styleFor_ = styleFor(event.kind);
+  const s = styleFor(kind);
   return (
     <div
       className={`flex h-full w-full flex-col gap-0.5 rounded border ${containerCls} px-2 py-1 ${
@@ -105,10 +105,8 @@ function GraphNodeLabel({
       }`}
     >
       <div className="flex items-center gap-1 text-[10px]">
-        <span aria-hidden>{styleFor_.icon}</span>
-        <span className="font-medium uppercase tracking-wide">
-          {styleFor_.label}
-        </span>
+        <span aria-hidden>{s.icon}</span>
+        <span className="font-medium uppercase tracking-wide">{s.label}</span>
       </div>
       <div
         className={`truncate text-[9px] text-zinc-500 ${
@@ -271,7 +269,7 @@ function buildGraph(
         summary,
         label: (
           <GraphNodeLabel
-            event={e}
+            kind={e.kind}
             isAnchor={isAnchor}
             caption={caption}
             captionMono={captionMono}
@@ -305,11 +303,11 @@ function GraphCanvas({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
     [flow],
   );
 
-  // ReactFlow's d3-zoom uses setPointerCapture on the node element, which
-  // suppresses React onMouseEnter on descendants. Use ReactFlow's blessed
-  // onNodeMouseEnter/Leave callbacks instead, and render the tooltip as
-  // a fixed-position sibling of <ReactFlow> so it's never clipped by the
-  // viewport's overflow:hidden.
+  // We observed React onMouseEnter on descendants of a ReactFlow node
+  // doesn't fire reliably; ReactFlow's `onNodeMouseEnter` / `Leave`
+  // props are the working contract. Tooltip is rendered as a child of
+  // <ReactFlow> using `position: fixed` so it escapes both the parent's
+  // and the viewport's `overflow: hidden`.
   const [hover, setHover] = useState<{
     event: Event;
     summary: string;
@@ -318,20 +316,30 @@ function GraphCanvas({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
   } | null>(null);
   const onNodeEnter = useCallback(
     (evt: React.MouseEvent, node: Node) => {
-      const ev = (node.data as { event?: Event } | undefined)?.event;
-      const summary =
-        (node.data as { summary?: string } | undefined)?.summary ?? "";
+      const data = node.data as
+        | { event?: Event; summary?: string }
+        | undefined;
+      const ev = data?.event;
       if (!ev) return;
-      setHover({ event: ev, summary, x: evt.clientX, y: evt.clientY });
+      setHover({
+        event: ev,
+        summary: data?.summary ?? "",
+        x: evt.clientX,
+        y: evt.clientY,
+      });
     },
     [],
   );
-  const onNodeMove = useCallback(
-    (evt: React.MouseEvent) => {
-      setHover((h) => (h ? { ...h, x: evt.clientX, y: evt.clientY } : h));
-    },
-    [],
-  );
+  const onNodeMove = useCallback((evt: React.MouseEvent) => {
+    // Skip identical-position updates so jitter / sub-pixel events
+    // don't churn React; on a 200-300 node graph the cumulative cost
+    // of pointless re-renders matters more than the branch.
+    setHover((h) => {
+      if (!h) return h;
+      if (h.x === evt.clientX && h.y === evt.clientY) return h;
+      return { ...h, x: evt.clientX, y: evt.clientY };
+    });
+  }, []);
   const onNodeLeave = useCallback(() => setHover(null), []);
 
   return (
