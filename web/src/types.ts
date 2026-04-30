@@ -29,6 +29,22 @@ export type Link = {
   inferredBy: string;
 };
 
+// Vendor-neutral token-counting shape. Mirrors the GraphQL `TokenUsage`
+// type — see ADR 0002. Optional fields use null over absence because
+// graphql-js renders missing/zero counters as null, not undefined.
+export type TokenUsage = {
+  vendor: string;
+  model: string;
+  serviceTier?: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number | null;
+  cacheWrite5mTokens?: number | null;
+  cacheWrite1hTokens?: number | null;
+  webSearchCalls?: number | null;
+  webFetchCalls?: number | null;
+};
+
 export type Event = {
   id: string;
   ts: string;
@@ -42,6 +58,8 @@ export type Event = {
   hash: string;
   prevHash?: string | null;
   links: Link[];
+  usage?: TokenUsage | null;
+  stopReason?: string | null;
 };
 
 export type EventsResponse = {
@@ -58,6 +76,7 @@ export type Session = {
   firstEventAt: string;
   lastEventAt: string;
   eventCount: number;
+  totalUsage?: TokenUsage | null;
 };
 
 export type SessionsResponse = {

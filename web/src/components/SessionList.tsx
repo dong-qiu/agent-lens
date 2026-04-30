@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { gql, sessionsQuery } from "../api/client";
 import type { Session, SessionsResponse } from "../types";
+import { compactNum, tokenUsageTooltip } from "../lib/tokenUsage";
 
 export function SessionList({
   onSelect,
@@ -76,8 +77,30 @@ function SessionRow({
             {formatAbsolute(session.firstEventAt)}
           </div>
         </div>
-        <div className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700">
-          {session.eventCount} {session.eventCount === 1 ? "event" : "events"}
+        <div className="flex shrink-0 items-center gap-2">
+          {session.totalUsage && (
+            <div
+              className="inline-flex items-center gap-1 rounded bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-900 ring-1 ring-violet-200 font-mono"
+              title={tokenUsageTooltip(session.totalUsage)}
+            >
+              <span aria-hidden>↑</span>
+              <span>{compactNum(session.totalUsage.inputTokens)}</span>
+              <span aria-hidden>↓</span>
+              <span>{compactNum(session.totalUsage.outputTokens)}</span>
+              {session.totalUsage.cacheReadTokens != null &&
+                session.totalUsage.cacheReadTokens > 0 && (
+                  <>
+                    <span className="text-violet-400">·</span>
+                    <span aria-label="cache read">◊</span>
+                    <span>{compactNum(session.totalUsage.cacheReadTokens)}</span>
+                  </>
+                )}
+            </div>
+          )}
+          <div className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700">
+            {session.eventCount}{" "}
+            {session.eventCount === 1 ? "event" : "events"}
+          </div>
         </div>
       </button>
     </li>
