@@ -206,8 +206,12 @@ func extractUsage(model string, usageRaw json.RawMessage) *TokenUsage {
 		return nil
 	}
 	if len(usageRaw) == 0 || string(usageRaw) == "null" {
-		// Missing / null usage isn't worth logging — pre-Claude-Code-1.x
-		// streams sometimes don't carry usage at all on early messages.
+		// Missing / null usage is silenced. ADR 0002 D3's INFO-log
+		// hedge targets cases where we *have* data and skip it (so a
+		// future Claude Code version that fills these in with real
+		// numbers doesn't get silently ignored). With no data present
+		// there's nothing to silently skip; logging here would only
+		// add noise without buying any forward-detection signal.
 		return nil
 	}
 	var u rawUsage

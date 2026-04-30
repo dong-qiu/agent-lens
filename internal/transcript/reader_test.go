@@ -406,6 +406,39 @@ func TestUsageOnRedactedOnlyMessage(t *testing.T) {
 	}
 }
 
+func TestUsageOnToolOnlyMessageCreatesStub(t *testing.T) {
+	// Tool-use-only message with real usage. Without a content block
+	// of kind "thinking" or "text" there's no natural carrier — the
+	// reader must synthesize a stub text block so the usage isn't
+	// dropped. This is the only branch where stub creation happens
+	// purely on usage's behalf (redacted_thinking is what triggers
+	// stubs in the other tests).
+	line := `{"type":"assistant","message":{"id":"msg_t","content":[` +
+		`{"type":"tool_use","id":"tu_1","name":"Read","input":{}}` +
+		`],"model":"claude-opus-4-7","stop_reason":"tool_use","usage":{` +
+		`"input_tokens":7,"output_tokens":8` +
+		`}}}`
+	got := parseLine([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d, want 1 stub text block; got=%+v", len(got), got)
+	}
+	if got[0].Kind != "text" || got[0].Content != "" {
+		t.Errorf("expected stub text block: %+v", got[0])
+	}
+	if got[0].MessageID != "msg_t" {
+		t.Errorf("stub must carry message id: %+v", got[0])
+	}
+	if got[0].Usage == nil || got[0].Usage.OutputTokens != 8 {
+		t.Errorf("stub must carry usage with output=8: %+v", got[0].Usage)
+	}
+	if got[0].StopReason != "tool_use" {
+		t.Errorf("StopReason = %q, want tool_use", got[0].StopReason)
+	}
+	if got[0].RedactedThinking != 0 {
+		t.Errorf("no redacted thinking in this case: %+v", got[0])
+	}
+}
+
 func TestMissingUsageDoesNotCrash(t *testing.T) {
 	// Real message, no usage field at all (early Claude Code versions
 	// observed without usage on the very first turn). Should pass
