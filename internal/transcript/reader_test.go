@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -222,6 +223,202 @@ func TestCursorPersists(t *testing.T) {
 	}
 	if got != 42 {
 		t.Errorf("whitespace cursor = %d, want 42", got)
+	}
+}
+
+// --- ADR 0002: token usage emission ---
+
+func TestUsageMappingCoversAllD2Fields(t *testing.T) {
+	// Anthropic shape with every field populated; verify each ADR 0002
+	// D2 mapping lands on the right TokenUsage field. raw must round-trip
+	// the original JSON so forensic re-parse stays possible.
+	usage := `{
+		"input_tokens": 11,
+		"output_tokens": 22,
+		"cache_creation_input_tokens": 33,
+		"cache_read_input_tokens": 44,
+		"service_tier": "priority",
+		"cache_creation": {
+			"ephemeral_5m_input_tokens": 55,
+			"ephemeral_1h_input_tokens": 66
+		},
+		"server_tool_use": {
+			"web_search_requests": 7,
+			"web_fetch_requests": 8
+		}
+	}`
+	line := `{"type":"assistant","message":{"id":"msg_a","content":[` +
+		`{"type":"text","text":"hello"}` +
+		`],"model":"claude-opus-4-7","stop_reason":"end_turn","usage":` + usage + `}}`
+	got := parseLine([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d, want 1", len(got))
+	}
+	u := got[0].Usage
+	if u == nil {
+		t.Fatalf("expected non-nil Usage, got nil; block=%+v", got[0])
+	}
+	checks := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"Vendor", u.Vendor, "anthropic"},
+		{"Model", u.Model, "claude-opus-4-7"},
+		{"ServiceTier", u.ServiceTier, "priority"},
+		{"InputTokens", u.InputTokens, 11},
+		{"OutputTokens", u.OutputTokens, 22},
+		{"CacheReadTokens", u.CacheReadTokens, 44},
+		{"CacheWrite5mTokens", u.CacheWrite5mTokens, 55},
+		{"CacheWrite1hTokens", u.CacheWrite1hTokens, 66},
+		{"WebSearchCalls", u.WebSearchCalls, 7},
+		{"WebFetchCalls", u.WebFetchCalls, 8},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s = %v, want %v", c.name, c.got, c.want)
+		}
+	}
+	if got[0].StopReason != "end_turn" {
+		t.Errorf("StopReason = %q, want %q", got[0].StopReason, "end_turn")
+	}
+	// Raw must be valid JSON re-decodable to the same numbers.
+	var roundTrip rawUsage
+	if err := json.Unmarshal(u.Raw, &roundTrip); err != nil {
+		t.Fatalf("Raw is not valid JSON: %v", err)
+	}
+	if roundTrip.InputTokens != 11 || roundTrip.OutputTokens != 22 {
+		t.Errorf("Raw round-trip lost data: %+v", roundTrip)
+	}
+}
+
+func TestSyntheticMessageIsMetadataOnly(t *testing.T) {
+	// `<synthetic>` is Claude Code's own stop-sequence placeholder;
+	// usage is meaningless. ADR 0002 D3 says skip + INFO log. The
+	// derived blocks themselves still pass through.
+	line := `{"type":"assistant","message":{"id":"msg_s","content":[` +
+		`{"type":"text","text":"placeholder"}` +
+		`],"model":"<synthetic>","stop_reason":"stop_sequence","usage":{` +
+		`"input_tokens":0,"output_tokens":0` +
+		`}}}`
+	got := parseLine([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d, want 1; got=%+v", len(got), got)
+	}
+	if got[0].Usage != nil {
+		t.Errorf("expected nil Usage for <synthetic>; got %+v", got[0].Usage)
+	}
+	// stop_reason still attaches — it's audit-relevant even when usage
+	// is meaningless (tells us this was a stop_sequence boundary).
+	if got[0].StopReason != "stop_sequence" {
+		t.Errorf("StopReason = %q, want stop_sequence", got[0].StopReason)
+	}
+}
+
+func TestAllZeroUsageIsMetadataOnly(t *testing.T) {
+	// Even with a real model, a usage block where every counter is 0
+	// is treated as metadata-only per ADR 0002 D3 (third branch).
+	line := `{"type":"assistant","message":{"id":"msg_z","content":[` +
+		`{"type":"text","text":"x"}` +
+		`],"model":"claude-opus-4-7","usage":{` +
+		`"input_tokens":0,"output_tokens":0,` +
+		`"cache_creation_input_tokens":0,"cache_read_input_tokens":0` +
+		`}}}`
+	got := parseLine([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d, want 1", len(got))
+	}
+	if got[0].Usage != nil {
+		t.Errorf("all-zero usage should be metadata-only: %+v", got[0].Usage)
+	}
+}
+
+func TestUsageAttachedToTextWhenBothExist(t *testing.T) {
+	// Mixed message: thinking + text, both real. Usage and stop_reason
+	// must land on the text block (the assistant_message DECISION),
+	// not on the thinking block — DECISION is the canonical "this
+	// message" event when text exists.
+	line := `{"type":"assistant","message":{"id":"msg_mix","content":[` +
+		`{"type":"thinking","thinking":"plan"},` +
+		`{"type":"text","text":"answer"}` +
+		`],"model":"claude-opus-4-7","stop_reason":"end_turn","usage":{` +
+		`"input_tokens":1,"output_tokens":2` +
+		`}}}`
+	got := parseLine([]byte(line))
+	if len(got) != 2 {
+		t.Fatalf("len(got)=%d, want 2", len(got))
+	}
+	if got[0].Kind != "thinking" || got[0].Usage != nil || got[0].StopReason != "" {
+		t.Errorf("thinking block must not carry usage/stop_reason: %+v", got[0])
+	}
+	if got[1].Kind != "text" || got[1].Usage == nil || got[1].StopReason != "end_turn" {
+		t.Errorf("text block must carry usage + stop_reason: %+v", got[1])
+	}
+}
+
+func TestUsageAttachedToThinkingWhenNoText(t *testing.T) {
+	// Thinking-only message with real thinking content (no text, no
+	// redaction) — usage rides on the THOUGHT event rather than
+	// synthesizing a stub. (Stubs are reserved for the redacted-only
+	// case, where we need the assistant_message marker for UI.)
+	line := `{"type":"assistant","message":{"id":"msg_th","content":[` +
+		`{"type":"thinking","thinking":"only thinking"}` +
+		`],"model":"claude-opus-4-7","stop_reason":"end_turn","usage":{` +
+		`"input_tokens":3,"output_tokens":4` +
+		`}}}`
+	got := parseLine([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d, want 1", len(got))
+	}
+	if got[0].Kind != "thinking" {
+		t.Errorf("expected thinking carrier, got %+v", got[0])
+	}
+	if got[0].Usage == nil || got[0].Usage.OutputTokens != 4 {
+		t.Errorf("thinking block must carry usage: %+v", got[0].Usage)
+	}
+	if got[0].StopReason != "end_turn" {
+		t.Errorf("StopReason = %q, want end_turn", got[0].StopReason)
+	}
+}
+
+func TestUsageOnRedactedOnlyMessage(t *testing.T) {
+	// Redacted-thinking-only message still produces a stub text block
+	// for the assistant_message DECISION; usage rides that same stub
+	// (avoids creating two stubs for the same message).
+	line := `{"type":"assistant","message":{"id":"msg_r","content":[` +
+		`{"type":"thinking","thinking":""},` +
+		`{"type":"thinking","thinking":""}` +
+		`],"model":"claude-opus-4-7","stop_reason":"end_turn","usage":{` +
+		`"input_tokens":5,"output_tokens":6` +
+		`}}}`
+	got := parseLine([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d, want 1 stub; got=%+v", len(got), got)
+	}
+	if got[0].Kind != "text" || got[0].Content != "" {
+		t.Errorf("expected stub text block: %+v", got[0])
+	}
+	if got[0].RedactedThinking != 2 {
+		t.Errorf("RedactedThinking = %d, want 2", got[0].RedactedThinking)
+	}
+	if got[0].Usage == nil || got[0].Usage.InputTokens != 5 {
+		t.Errorf("stub must carry usage: %+v", got[0].Usage)
+	}
+}
+
+func TestMissingUsageDoesNotCrash(t *testing.T) {
+	// Real message, no usage field at all (early Claude Code versions
+	// observed without usage on the very first turn). Should pass
+	// through with nil Usage and not log spuriously.
+	line := `{"type":"assistant","message":{"id":"msg_n","content":[` +
+		`{"type":"text","text":"hi"}` +
+		`],"model":"claude-opus-4-7"}}`
+	got := parseLine([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d, want 1", len(got))
+	}
+	if got[0].Usage != nil {
+		t.Errorf("expected nil Usage, got %+v", got[0].Usage)
 	}
 }
 
