@@ -65,6 +65,20 @@ export function EventCard({ event }: { event: Event }) {
                 </span>
               ) : null;
             })()}
+            {(() => {
+              const n = redactedThinkingCount(event);
+              return n > 0 ? (
+                <span
+                  className="inline-flex items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 ring-1 ring-zinc-300"
+                  title={`Claude Code dropped ${n} thinking block${n === 1 ? "" : "s"} from this message — only the signature was preserved in the transcript. Capturing the original thinking content requires §10.4 proxy mode.`}
+                >
+                  <span>🚫</span>
+                  <span>
+                    {n} thinking redacted
+                  </span>
+                </span>
+              ) : null;
+            })()}
             {event.links?.length > 0 && (
               <span
                 className="inline-flex items-center gap-0.5 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 ring-1 ring-zinc-300"
@@ -224,6 +238,17 @@ function asString(v: unknown): string {
 
 function clip(s: string, n = 280): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+// redactedThinkingCount reads the per-message count of `thinking`
+// content blocks Claude Code dropped from the transcript. Set by the
+// hook on `assistant_message` DECISION events; absent / 0 elsewhere.
+function redactedThinkingCount(event: Event): number {
+  if (event.kind !== "DECISION") return 0;
+  const p = (event.payload ?? {}) as Record<string, unknown>;
+  if (p.marker !== "assistant_message") return 0;
+  const v = p.thinking_redacted_by_claude_code;
+  return typeof v === "number" && v > 0 ? v : 0;
 }
 
 // authorizationBadge classifies a TOOL_CALL by the authorization

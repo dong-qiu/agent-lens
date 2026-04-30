@@ -196,11 +196,19 @@ func makeStopEvents(in *claudeHookInput) ([]map[string]any, func() error) {
 				"source":     "transcript",
 			}))
 		case "text":
-			events = append(events, baseEvent(in, agentActorWithModel(b.Model), "decision", map[string]any{
+			payload := map[string]any{
 				"marker":     "assistant_message",
 				"text":       b.Content,
 				"message_id": b.MessageID,
-			}))
+			}
+			// Surface Claude-Code-side redaction of `thinking` content
+			// so audit readers don't mistake "transcript field empty"
+			// for "model didn't think". Capturing the actual content
+			// requires §10.4 proxy mode.
+			if b.RedactedThinking > 0 {
+				payload["thinking_redacted_by_claude_code"] = b.RedactedThinking
+			}
+			events = append(events, baseEvent(in, agentActorWithModel(b.Model), "decision", payload))
 		}
 	}
 	events = append(events, turnEnd)

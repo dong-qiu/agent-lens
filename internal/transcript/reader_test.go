@@ -94,6 +94,94 @@ func TestReadIgnoresPartialTrailingLine(t *testing.T) {
 	}
 }
 
+func TestRedactedThinkingAttachedToTextBlock(t *testing.T) {
+	// Claude Code's transcript writes `signature` but drops `thinking`
+	// content (the field is empty). Verify we count those instead of
+	// silently dropping them, and attach the count to the first text
+	// block so the derived assistant_message DECISION carries it.
+	line := `{"type":"assistant","message":{"id":"msg_x","content":[` +
+		`{"type":"thinking","thinking":""},` +
+		`{"type":"thinking","thinking":""},` +
+		`{"type":"thinking","thinking":"real reasoning"},` +
+		`{"type":"text","text":"hello"}` +
+		`],"model":"claude-opus-4-7"}}`
+	got := parseLine([]byte(line))
+	if len(got) != 2 {
+		t.Fatalf("len(got)=%d, want 2 (one non-empty thinking + one text); got=%+v", len(got), got)
+	}
+	if got[0].Kind != "thinking" || got[0].Content != "real reasoning" || got[0].RedactedThinking != 0 {
+		t.Errorf("non-empty thinking should not carry redaction count: %+v", got[0])
+	}
+	if got[1].Kind != "text" || got[1].Content != "hello" || got[1].RedactedThinking != 2 {
+		t.Errorf("text block should carry redaction count of 2: %+v", got[1])
+	}
+}
+
+func TestRedactedThinkingOnlyEmitsStubTextBlock(t *testing.T) {
+	// When a message has only redacted thinking and no text, we still
+	// need to produce a DECISION event so the count surfaces. The
+	// reader emits a stub text block (empty content) to drive that.
+	line := `{"type":"assistant","message":{"id":"msg_y","content":[` +
+		`{"type":"thinking","thinking":""},` +
+		`{"type":"thinking","thinking":""}` +
+		`],"model":"claude-opus-4-7"}}`
+	got := parseLine([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d, want 1 stub text block; got=%+v", len(got), got)
+	}
+	if got[0].Kind != "text" || got[0].Content != "" || got[0].RedactedThinking != 2 {
+		t.Errorf("stub text block should be empty with count=2: %+v", got[0])
+	}
+	if got[0].MessageID != "msg_y" {
+		t.Errorf("stub should carry message id: %+v", got[0])
+	}
+}
+
+func TestRedactedThinkingPlusRealThinkingNoText(t *testing.T) {
+	// Message has both real thinking AND redacted thinking but no text
+	// block. The non-empty thinking block must still emit a THOUGHT event
+	// without picking up the redaction count, AND a stub text block must
+	// fire with the count so the assistant_message DECISION carries it.
+	// Verifies we attach the count to the stub even when other (non-text)
+	// blocks were emitted before the loop reached its end.
+	line := `{"type":"assistant","message":{"id":"msg_w","content":[` +
+		`{"type":"thinking","thinking":"real reasoning"},` +
+		`{"type":"thinking","thinking":""},` +
+		`{"type":"thinking","thinking":""}` +
+		`],"model":"claude-opus-4-7"}}`
+	got := parseLine([]byte(line))
+	if len(got) != 2 {
+		t.Fatalf("len(got)=%d, want 2 (real thinking + stub text); got=%+v", len(got), got)
+	}
+	if got[0].Kind != "thinking" || got[0].Content != "real reasoning" || got[0].RedactedThinking != 0 {
+		t.Errorf("real thinking block must not carry redaction count: %+v", got[0])
+	}
+	if got[1].Kind != "text" || got[1].Content != "" || got[1].RedactedThinking != 2 {
+		t.Errorf("stub text block should be empty with count=2: %+v", got[1])
+	}
+	if got[1].MessageID != "msg_w" {
+		t.Errorf("stub should carry message id: %+v", got[1])
+	}
+}
+
+func TestNoRedactionWhenAllThinkingNonEmpty(t *testing.T) {
+	// Sanity: when no thinking blocks are empty, the text block must
+	// not pick up a stale RedactedThinking value (default zero).
+	line := `{"type":"assistant","message":{"id":"msg_z","content":[` +
+		`{"type":"thinking","thinking":"real"},` +
+		`{"type":"text","text":"hi"}` +
+		`],"model":"claude-opus-4-7"}}`
+	got := parseLine([]byte(line))
+	if len(got) != 2 {
+		t.Fatalf("len(got)=%d, want 2; got=%+v", len(got), got)
+	}
+	for _, b := range got {
+		if b.RedactedThinking != 0 {
+			t.Errorf("expected RedactedThinking=0, got %+v", b)
+		}
+	}
+}
+
 func TestParseLineSkipsUnknownAndMalformed(t *testing.T) {
 	cases := []string{
 		``,
