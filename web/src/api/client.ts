@@ -30,6 +30,12 @@ export const sessionsQuery = `
       firstEventAt
       lastEventAt
       eventCount
+      totalUsage {
+        vendor model serviceTier
+        inputTokens outputTokens
+        cacheReadTokens cacheWrite5mTokens cacheWrite1hTokens
+        webSearchCalls webFetchCalls
+      }
     }
   }
 `;
@@ -49,6 +55,13 @@ export const eventsQuery = `
       hash
       prevHash
       links { fromEvent toEvent relation inferredBy }
+      usage {
+        vendor model serviceTier
+        inputTokens outputTokens
+        cacheReadTokens cacheWrite5mTokens cacheWrite1hTokens
+        webSearchCalls webFetchCalls
+      }
+      stopReason
     }
     sessionHead(sessionId: $sessionId)
   }
@@ -72,6 +85,13 @@ export const linkedEventsQuery = `
       hash
       prevHash
       links { fromEvent toEvent relation inferredBy }
+      usage {
+        vendor model serviceTier
+        inputTokens outputTokens
+        cacheReadTokens cacheWrite5mTokens cacheWrite1hTokens
+        webSearchCalls webFetchCalls
+      }
+      stopReason
     }
   }
 `;

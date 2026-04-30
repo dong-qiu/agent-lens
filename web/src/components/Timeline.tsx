@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { gql, eventsQuery } from "../api/client";
-import type { Event, EventKind, EventsResponse } from "../types";
+import type { Event, EventKind, EventsResponse, TokenUsage } from "../types";
 import { EventCard } from "./EventCard";
 import { styleFor } from "./kindStyle";
+import { compactNum, tokenUsageTooltip } from "../lib/tokenUsage";
 
 export function Timeline({ sessionId }: { sessionId: string }) {
   const [activeKinds, setActiveKinds] = useState<Set<EventKind>>(new Set());
@@ -16,6 +17,14 @@ export function Timeline({ sessionId }: { sessionId: string }) {
   });
 
   const counts = useMemo(() => countByKind(data?.events ?? []), [data?.events]);
+  // Partial-total: client aggregation across only the events fetched
+  // (limit=200). For sessions ≤ 200 events this is exact; for larger
+  // ones it under-counts. Truth-of-record `Session.totalUsage` is on
+  // the SessionList row.
+  const usageTotal = useMemo(
+    () => aggregateUsage(data?.events ?? []),
+    [data?.events],
+  );
 
   const visible = useMemo(() => {
     if (!data) return [];
@@ -63,6 +72,25 @@ export function Timeline({ sessionId }: { sessionId: string }) {
           <div className="text-xs text-zinc-500 font-mono">
             head {data.sessionHead ? data.sessionHead.slice(0, 16) : "(empty)"}
           </div>
+          {usageTotal && (
+            <div
+              className="inline-flex items-center gap-1 rounded bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-900 ring-1 ring-violet-200 font-mono"
+              title={tokenUsageTooltip(usageTotal) + "\n\n(across fetched events; SessionList shows session truth-of-record)"}
+            >
+              <span aria-hidden>↑</span>
+              <span>{compactNum(usageTotal.inputTokens)}</span>
+              <span aria-hidden>↓</span>
+              <span>{compactNum(usageTotal.outputTokens)}</span>
+              {usageTotal.cacheReadTokens != null &&
+                usageTotal.cacheReadTokens > 0 && (
+                  <>
+                    <span className="text-violet-400">·</span>
+                    <span aria-label="cache read">◊</span>
+                    <span>{compactNum(usageTotal.cacheReadTokens)}</span>
+                  </>
+                )}
+            </div>
+          )}
           {isFetching && (
             <div className="text-xs text-zinc-400">refreshing…</div>
           )}
@@ -160,4 +188,49 @@ function countByKind(events: Event[]): Partial<Record<EventKind, number>> {
     out[e.kind] = (out[e.kind] ?? 0) + 1;
   }
   return out;
+}
+
+// aggregateUsage sums per-message token counters across the events the
+// caller has on hand. Mirrors the server-side `aggregateSessionUsage`
+// shape but operates on already-fetched events; see Timeline's caveat
+// on partial totals.
+function aggregateUsage(events: Event[]): TokenUsage | null {
+  let any = false;
+  let inputT = 0;
+  let outputT = 0;
+  let cacheR = 0;
+  let cache5m = 0;
+  let cache1h = 0;
+  let webSearch = 0;
+  let webFetch = 0;
+  const vendors = new Set<string>();
+  const models = new Set<string>();
+  const tiers = new Set<string>();
+  for (const e of events) {
+    if (!e.usage) continue;
+    any = true;
+    inputT += e.usage.inputTokens;
+    outputT += e.usage.outputTokens;
+    if (e.usage.cacheReadTokens) cacheR += e.usage.cacheReadTokens;
+    if (e.usage.cacheWrite5mTokens) cache5m += e.usage.cacheWrite5mTokens;
+    if (e.usage.cacheWrite1hTokens) cache1h += e.usage.cacheWrite1hTokens;
+    if (e.usage.webSearchCalls) webSearch += e.usage.webSearchCalls;
+    if (e.usage.webFetchCalls) webFetch += e.usage.webFetchCalls;
+    if (e.usage.vendor) vendors.add(e.usage.vendor);
+    if (e.usage.model) models.add(e.usage.model);
+    if (e.usage.serviceTier) tiers.add(e.usage.serviceTier);
+  }
+  if (!any) return null;
+  return {
+    vendor: vendors.size === 1 ? [...vendors][0] : "",
+    model: models.size === 1 ? [...models][0] : "",
+    serviceTier: tiers.size === 1 ? [...tiers][0] : null,
+    inputTokens: inputT,
+    outputTokens: outputT,
+    cacheReadTokens: cacheR > 0 ? cacheR : null,
+    cacheWrite5mTokens: cache5m > 0 ? cache5m : null,
+    cacheWrite1hTokens: cache1h > 0 ? cache1h : null,
+    webSearchCalls: webSearch > 0 ? webSearch : null,
+    webFetchCalls: webFetch > 0 ? webFetch : null,
+  };
 }

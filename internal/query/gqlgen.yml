@@ -26,3 +26,17 @@ models:
       # nothing, and we can DataLoader-batch later.
       links:
         resolver: true
+      # usage / stopReason are derived from the event's JSON payload
+      # rather than columns on the storage struct — wire them as
+      # resolvers so the gqlgen-generated Event model stays a thin
+      # reflection of the storage layer.
+      usage:
+        resolver: true
+      stopReason:
+        resolver: true
+  Session:
+    fields:
+      # totalUsage loads all events in the session to aggregate; lazy
+      # so the cheap `sessions()` listing isn't burdened by it.
+      totalUsage:
+        resolver: true

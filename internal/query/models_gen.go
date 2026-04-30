@@ -30,6 +30,17 @@ type Event struct {
 	PrevHash  *string        `json:"prevHash,omitempty"`
 	// All links touching this event in either direction (from/to).
 	Links []*Link `json:"links"`
+	// Token usage of the assistant message that derived this event. Present
+	// only on events derived from a real-usage assistant message (per ADR
+	// 0002 D3, `<synthetic>` placeholders and all-zero messages return
+	// null). The carrier event per message is the first text block, then
+	// the first thinking block, then a synthesized stub — so usage never
+	// double-counts in turn / session aggregation.
+	Usage *TokenUsage `json:"usage,omitempty"`
+	// Reason the model stopped on the message that derived this event:
+	// `end_turn`, `tool_use`, `stop_sequence`, etc. Sourced verbatim from
+	// the Anthropic transcript `message.stop_reason` field.
+	StopReason *string `json:"stopReason,omitempty"`
 }
 
 type Link struct {
@@ -49,6 +60,35 @@ type Session struct {
 	FirstEventAt time.Time `json:"firstEventAt"`
 	LastEventAt  time.Time `json:"lastEventAt"`
 	EventCount   int       `json:"eventCount"`
+	// Aggregate token usage across every event in this session that has
+	// `usage`. Numeric counters (input/output/cache_read/cache_write) are
+	// exact sums. Non-numeric fields summarize: `vendor` is the dominant
+	// value (or empty if mixed); `model` is empty when more than one model
+	// appeared (multi-model sessions), else the single model id;
+	// `serviceTier` likewise. Returns null when no event in the session
+	// carries usage.
+	TotalUsage *TokenUsage `json:"totalUsage,omitempty"`
+}
+
+// Vendor-neutral token-counting shape per ADR 0002 D2. Per-event usage
+// exposes vendor / model / service_tier of the originating message.
+//
+// When returned as `Session.totalUsage`, only numeric counters aggregate
+// meaningfully; vendor / model / service_tier carry best-effort summary
+// values (see Session.totalUsage docs). Cache and server-tool fields are
+// optional because some vendors (e.g. OpenAI) don't have a directly
+// comparable concept.
+type TokenUsage struct {
+	Vendor             string  `json:"vendor"`
+	Model              string  `json:"model"`
+	ServiceTier        *string `json:"serviceTier,omitempty"`
+	InputTokens        int     `json:"inputTokens"`
+	OutputTokens       int     `json:"outputTokens"`
+	CacheReadTokens    *int    `json:"cacheReadTokens,omitempty"`
+	CacheWrite5mTokens *int    `json:"cacheWrite5mTokens,omitempty"`
+	CacheWrite1hTokens *int    `json:"cacheWrite1hTokens,omitempty"`
+	WebSearchCalls     *int    `json:"webSearchCalls,omitempty"`
+	WebFetchCalls      *int    `json:"webFetchCalls,omitempty"`
 }
 
 type ActorType string
