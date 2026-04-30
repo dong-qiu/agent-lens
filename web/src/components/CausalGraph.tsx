@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import ReactFlow, {
   Background,
@@ -76,6 +76,97 @@ function shortenSessionId(sid: string): string {
     return sid.length > 22 ? sid.slice(0, 22) + "…" : sid;
   }
   return sid.slice(0, 8) + "…" + sid.slice(-4);
+}
+
+// GraphNodeLabel renders one node's interior. The hover tooltip is NOT
+// rendered here — ReactFlow's d3-zoom path uses setPointerCapture, which
+// suppresses React's onMouseEnter on descendant elements, so per-node
+// hover state never flips. The canonical fix is to use ReactFlow's own
+// `onNodeMouseEnter` / `onNodeMouseLeave` callbacks, which the library
+// fires before pointer capture; that lives one level up in GraphCanvas.
+function GraphNodeLabel({
+  event,
+  isAnchor,
+  caption,
+  captionMono,
+  containerCls,
+}: {
+  event: Event;
+  isAnchor: boolean;
+  caption: string;
+  captionMono: boolean;
+  containerCls: string;
+}) {
+  const styleFor_ = styleFor(event.kind);
+  return (
+    <div
+      className={`flex h-full w-full flex-col gap-0.5 rounded border ${containerCls} px-2 py-1 ${
+        isAnchor ? "" : "ring-2 ring-purple-300 ring-offset-1"
+      }`}
+    >
+      <div className="flex items-center gap-1 text-[10px]">
+        <span aria-hidden>{styleFor_.icon}</span>
+        <span className="font-medium uppercase tracking-wide">
+          {styleFor_.label}
+        </span>
+      </div>
+      <div
+        className={`truncate text-[9px] text-zinc-500 ${
+          captionMono ? "font-mono" : ""
+        }`}
+      >
+        {caption}
+      </div>
+    </div>
+  );
+}
+
+// nodeSummary derives a short, human-meaningful caption from an event's
+// payload, sized to fit the 180-px graph tile. Mirrors EventCard's
+// `summarize()` logic but trimmed to a single short string — the timeline
+// has a full row of width to play with, the graph node does not.
+//
+// Returns "" when no caption can be derived; callers fall back to the
+// ULID tail or session shorthand to preserve a stable identifier.
+function nodeSummary(event: Event): string {
+  const p = (event.payload ?? {}) as Record<string, unknown>;
+  const asStr = (v: unknown) => (typeof v === "string" ? v : "");
+  const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
+  switch (event.kind) {
+    case "TOOL_CALL":
+    case "TOOL_RESULT":
+      return asStr(p.name);
+    case "PROMPT":
+    case "THOUGHT":
+      return clip(asStr(p.text).replace(/\s+/g, " ").trim(), 24);
+    case "COMMIT": {
+      const sha = asStr(p.sha).slice(0, 7);
+      const subject = asStr(p.subject);
+      return subject ? `${sha} · ${clip(subject, 16)}` : sha;
+    }
+    case "DECISION":
+      return asStr(p.marker);
+    case "PUSH":
+      return asStr(p.ref).replace(/^refs\/(heads|tags)\//, "");
+    case "BUILD": {
+      const run = (p.workflow_run ?? {}) as Record<string, unknown>;
+      return asStr(run.name) || asStr(p.workflow);
+    }
+    case "DEPLOY":
+      return asStr(p.environment);
+    case "REVIEW":
+      return asStr(p.action);
+    case "PR": {
+      const n = p.number;
+      return typeof n === "number" ? `#${n}` : "";
+    }
+    case "CODE_CHANGE":
+      return "diff";
+    case "TEST_RUN":
+      return asStr(p.status);
+    default:
+      return "";
+  }
 }
 
 function buildGraph(
@@ -158,27 +249,34 @@ function buildGraph(
     const s = styleFor(e.kind);
     const idTail = e.id.length > 12 ? e.id.slice(-12) : e.id;
     const isAnchor = e.sessionId === anchorSessionID;
+    const summary = nodeSummary(e);
+    // Prefer the kind-aware summary; fall back to the ULID tail (anchor)
+    // or session shorthand (cross-session) so unknown payload shapes still
+    // get a stable identifier on the tile.
+    const caption =
+      summary || (isAnchor ? idTail : shortenSessionId(e.sessionId));
+    // Mono for ULIDs / SHAs; sans-serif for prose so truncated subjects
+    // and prompts are easier to scan.
+    const captionMono =
+      !summary || /^[0-9a-f]{7,}( ·|$)/.test(summary) || /^git-/.test(summary);
     return {
       id: e.id,
       position: positions[e.id] ?? { x: 0, y: 0 },
       data: {
         kind: e.kind,
+        // Stash the source event + derived summary so GraphCanvas can
+        // resolve them in onNodeMouseEnter without a lookup back through
+        // the events array.
+        event: e,
+        summary,
         label: (
-          <div
-            className={`flex h-full w-full flex-col gap-0.5 rounded border ${s.container} px-2 py-1 ${
-              isAnchor ? "" : "ring-2 ring-purple-300 ring-offset-1"
-            }`}
-          >
-            <div className="flex items-center gap-1 text-[10px]">
-              <span aria-hidden>{s.icon}</span>
-              <span className="font-medium uppercase tracking-wide">
-                {s.label}
-              </span>
-            </div>
-            <div className="truncate font-mono text-[9px] text-zinc-500">
-              {isAnchor ? idTail : shortenSessionId(e.sessionId)}
-            </div>
-          </div>
+          <GraphNodeLabel
+            event={e}
+            isAnchor={isAnchor}
+            caption={caption}
+            captionMono={captionMono}
+            containerCls={s.container}
+          />
         ),
       },
       style: {
@@ -207,6 +305,35 @@ function GraphCanvas({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
     [flow],
   );
 
+  // ReactFlow's d3-zoom uses setPointerCapture on the node element, which
+  // suppresses React onMouseEnter on descendants. Use ReactFlow's blessed
+  // onNodeMouseEnter/Leave callbacks instead, and render the tooltip as
+  // a fixed-position sibling of <ReactFlow> so it's never clipped by the
+  // viewport's overflow:hidden.
+  const [hover, setHover] = useState<{
+    event: Event;
+    summary: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const onNodeEnter = useCallback(
+    (evt: React.MouseEvent, node: Node) => {
+      const ev = (node.data as { event?: Event } | undefined)?.event;
+      const summary =
+        (node.data as { summary?: string } | undefined)?.summary ?? "";
+      if (!ev) return;
+      setHover({ event: ev, summary, x: evt.clientX, y: evt.clientY });
+    },
+    [],
+  );
+  const onNodeMove = useCallback(
+    (evt: React.MouseEvent) => {
+      setHover((h) => (h ? { ...h, x: evt.clientX, y: evt.clientY } : h));
+    },
+    [],
+  );
+  const onNodeLeave = useCallback(() => setHover(null), []);
+
   return (
     <ReactFlow
       nodes={nodes}
@@ -215,6 +342,9 @@ function GraphCanvas({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
       nodesDraggable={false}
       nodesConnectable={false}
       elementsSelectable={false}
+      onNodeMouseEnter={onNodeEnter}
+      onNodeMouseMove={onNodeMove}
+      onNodeMouseLeave={onNodeLeave}
       proOptions={{ hideAttribution: true }}
     >
       <Background gap={16} size={1} color="#e4e4e7" />
@@ -231,6 +361,30 @@ function GraphCanvas({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) {
         nodeStrokeWidth={0}
         maskColor="rgba(255, 255, 255, 0.6)"
       />
+      {hover && (
+        <div
+          className="pointer-events-none fixed z-[9999] max-w-[320px] rounded bg-zinc-900 px-2 py-1.5 text-left text-[11px] text-white shadow-lg ring-1 ring-zinc-700"
+          style={{
+            left: hover.x + 14,
+            top: hover.y + 14,
+            wordBreak: "break-all",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          <div className="font-semibold uppercase tracking-wide">
+            {hover.event.kind}
+          </div>
+          <div className="mt-0.5 font-mono text-[10px] text-zinc-300">
+            id: {hover.event.id}
+          </div>
+          <div className="font-mono text-[10px] text-zinc-300">
+            session: {hover.event.sessionId}
+          </div>
+          {hover.summary && (
+            <div className="mt-1 text-zinc-100">{hover.summary}</div>
+          )}
+        </div>
+      )}
     </ReactFlow>
   );
 }
