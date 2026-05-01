@@ -2,7 +2,7 @@
 
 面向 Coding Agent 的透明可审计系统。捕获开发者 ↔ Coding Agent 的交互、Agent 内部推理（thinking）、工具调用与下游产出（commit / PR / build / deploy），串成一条可验证的证据链。
 
-设计与决策见 [`SPEC.md`](./SPEC.md)（v0.4）。Claude Code 工作指引见 [`CLAUDE.md`](./CLAUDE.md)。
+设计文档分两层：[`SPEC.md`](./SPEC.md) 描述系统**现在是什么**，[`docs/ADR/`](./docs/ADR/README.md) 是**为什么这么决定**的决策档案（含 ADR 协作约定）。Claude Code 工作指引见 [`CLAUDE.md`](./CLAUDE.md)。
 
 ## 状态
 
