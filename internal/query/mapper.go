@@ -87,6 +87,19 @@ func toGQLLink(l *store.Link) *Link {
 // what the hook writes; this struct is kept here (not imported) so the
 // query package doesn't take a dependency on cmd/agent-lens-hook just
 // to decode wire format.
+//
+// Adding a new TokenUsage field requires touching FOUR places, kept
+// in lock-step intentionally so a stale producer / consumer / shape
+// fails loudly rather than dropping data:
+//   1. internal/transcript/reader.go           — TokenUsage struct + extractUsage mapping (producer)
+//   2. internal/query/mapper.go (this file)    — wireUsage struct + decodePayloadUsage assignment + aggregateSessionUsage accumulator
+//   3. internal/query/schema.graphql           — TokenUsage type (regen via `make gqlgen`)
+//   4. web/src/types.ts + UI chips             — TokenUsage type + chip / tooltip rendering
+//
+// TestTokenUsageGraphQLShape catches drift on (3); the others rely on
+// build-time field alignment between wireUsage / TokenUsage. Keep
+// snake_case wire and camelCase GraphQL — that asymmetry is forced by
+// the wire format already shipped in #63.
 type wireUsage struct {
 	Vendor             string `json:"vendor"`
 	Model              string `json:"model"`

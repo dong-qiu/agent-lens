@@ -4,7 +4,11 @@ import { gql, eventsQuery } from "../api/client";
 import type { Event, EventKind, EventsResponse, TokenUsage } from "../types";
 import { EventCard } from "./EventCard";
 import { styleFor } from "./kindStyle";
-import { compactNum, tokenUsageTooltip } from "../lib/tokenUsage";
+import {
+  compactNum,
+  tokenUsageAriaLabel,
+  tokenUsageTooltip,
+} from "../lib/tokenUsage";
 
 export function Timeline({ sessionId }: { sessionId: string }) {
   const [activeKinds, setActiveKinds] = useState<Set<EventKind>>(new Set());
@@ -76,6 +80,9 @@ export function Timeline({ sessionId }: { sessionId: string }) {
             <div
               className="inline-flex items-center gap-1 rounded bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-900 ring-1 ring-violet-200 font-mono"
               title={tokenUsageTooltip(usageTotal) + "\n\n(across fetched events; SessionList shows session truth-of-record)"}
+              aria-label={
+                "fetched-events total: " + tokenUsageAriaLabel(usageTotal)
+              }
             >
               <span aria-hidden>↑</span>
               <span>{compactNum(usageTotal.inputTokens)}</span>
