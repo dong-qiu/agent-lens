@@ -30,6 +30,30 @@ These were settled during initial scoping and are referenced throughout `SPEC.md
 - Architecture decisions live in `docs/ADR/` (see `docs/ADR/README.md` for the SPEC vs ADR vs Patch mechanism). Accepted ADRs are append-only — propose a new ADR rather than editing one in place. Non-trivial design choices (new EventKind, schema change, irreversible tech selection) should land as a draft ADR before code.
 - Common commands are wired in the `Makefile`: `make build`, `make proto`, `make gqlgen`, `make test`, `make test-integration`, `make migrate-up`, `make compose-up`, `make web-dev`, `make web-build`. `make help` lists them all.
 
+## Self-review checklist before merge
+
+Self-review is the main quality gate in this repo. Two distinct failure modes to guard against — mechanical (CI catches them, but only after pushing) and judgment (CI can't catch; we have to). Treat them as separate passes.
+
+**Mechanical pass — run before every PR**:
+- `git status --short` — confirm only intended files are staged. Use `git add <paths>` rather than `git add -A` when there are untracked files in the working tree.
+- If the PR touches `proto/` or `internal/query/schema.graphql`: run `make proto && make gqlgen`. The `codegen drift` CI check will reject the PR otherwise.
+- `make test && go vet ./...`; for web changes, `(cd web && npx tsc --noEmit)`.
+- `git diff --cached` (or `git show HEAD` after committing) — visually scan for `DEBUG`, `console.log`, leftover stub comments, or `// TODO` you meant to resolve.
+
+**Judgment pass — explicit prompts to challenge the implementation**:
+- "If a hostile reviewer wanted to reject this, what would they catch?"
+- "What did I write off as 'fine for v1' or 'acceptable trade-off'? Either fix in this PR or open a follow-up issue with explicit activation conditions — leaving it as an unowned comment guarantees it'll be forgotten."
+- "What's the longest comment I wrote? If it's longer than the code it documents, I probably wasn't sure — re-examine."
+- "Does the change have UX / visual / perception aspects (tooltip latency, animation, layout shift, color contrast)? **Self-review does NOT cover these** — flag explicitly and ask the user for manual smoke."
+
+**External view for non-trivial PRs**:
+- < 100 LOC, single concern: self-review + mechanical pass is enough.
+- Touches GraphQL schema / event payload shape / attestation predicates / public CLI flags: run `/review` for a fresh-context second opinion before submitting self-review.
+- Cross-stage or spans multiple packages: ask the user about running `/ultrareview`.
+
+**Post-merge calibration**:
+- If CI catches something self-review missed, the same mechanical check goes into the pre-flight pass next time. Add it here so the next contributor (or future-me) inherits the lesson.
+
 ## Local development with persistence
 
 The collector defaults to `AGENT_LENS_STORE=postgres`. To run the dogfood loop with data that survives restarts:
