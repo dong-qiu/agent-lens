@@ -2,11 +2,7 @@ import { lazy, Suspense, useMemo, useState } from "react";
 import type { Event } from "../types";
 import { styleFor, formatTimestamp } from "./kindStyle";
 import { payloadToDiff } from "../lib/payloadToDiff";
-import {
-  compactNum,
-  tokenUsageAriaLabel,
-  tokenUsageTooltip,
-} from "../lib/tokenUsage";
+import { TokenUsageChip } from "./TokenUsageChip";
 
 // React.lazy keeps the ~600 KB Monaco bundle out of the eager chunk:
 // users who never expand a diff never pay for it. The dynamic import
@@ -85,24 +81,10 @@ export function EventCard({ event }: { event: Event }) {
               ) : null;
             })()}
             {event.usage && (
-              <span
-                className="inline-flex items-center gap-1 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-900 ring-1 ring-violet-200 font-mono"
-                title={tokenUsageTooltip(event.usage, event.stopReason)}
-                aria-label={tokenUsageAriaLabel(event.usage)}
-              >
-                <span aria-hidden>↑</span>
-                <span>{compactNum(event.usage.inputTokens)}</span>
-                <span aria-hidden>↓</span>
-                <span>{compactNum(event.usage.outputTokens)}</span>
-                {event.usage.cacheReadTokens != null &&
-                  event.usage.cacheReadTokens > 0 && (
-                    <>
-                      <span className="text-violet-400">·</span>
-                      <span aria-label="cache read">◊</span>
-                      <span>{compactNum(event.usage.cacheReadTokens)}</span>
-                    </>
-                  )}
-              </span>
+              <TokenUsageChip
+                usage={event.usage}
+                stopReason={event.stopReason}
+              />
             )}
             {event.links?.length > 0 && (
               <span
