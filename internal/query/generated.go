@@ -31,6 +31,7 @@ type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 type ResolverRoot interface {
 	Event() EventResolver
 	Query() QueryResolver
+	Session() SessionResolver
 }
 
 type DirectiveRoot struct {
@@ -44,18 +45,20 @@ type ComplexityRoot struct {
 	}
 
 	Event struct {
-		Actor     func(childComplexity int) int
-		Hash      func(childComplexity int) int
-		ID        func(childComplexity int) int
-		Kind      func(childComplexity int) int
-		Links     func(childComplexity int) int
-		Parents   func(childComplexity int) int
-		Payload   func(childComplexity int) int
-		PrevHash  func(childComplexity int) int
-		Refs      func(childComplexity int) int
-		SessionID func(childComplexity int) int
-		Ts        func(childComplexity int) int
-		TurnID    func(childComplexity int) int
+		Actor      func(childComplexity int) int
+		Hash       func(childComplexity int) int
+		ID         func(childComplexity int) int
+		Kind       func(childComplexity int) int
+		Links      func(childComplexity int) int
+		Parents    func(childComplexity int) int
+		Payload    func(childComplexity int) int
+		PrevHash   func(childComplexity int) int
+		Refs       func(childComplexity int) int
+		SessionID  func(childComplexity int) int
+		StopReason func(childComplexity int) int
+		Ts         func(childComplexity int) int
+		TurnID     func(childComplexity int) int
+		Usage      func(childComplexity int) int
 	}
 
 	Link struct {
@@ -79,11 +82,27 @@ type ComplexityRoot struct {
 		FirstEventAt func(childComplexity int) int
 		ID           func(childComplexity int) int
 		LastEventAt  func(childComplexity int) int
+		TotalUsage   func(childComplexity int) int
+	}
+
+	TokenUsage struct {
+		CacheReadTokens    func(childComplexity int) int
+		CacheWrite1hTokens func(childComplexity int) int
+		CacheWrite5mTokens func(childComplexity int) int
+		InputTokens        func(childComplexity int) int
+		Model              func(childComplexity int) int
+		OutputTokens       func(childComplexity int) int
+		ServiceTier        func(childComplexity int) int
+		Vendor             func(childComplexity int) int
+		WebFetchCalls      func(childComplexity int) int
+		WebSearchCalls     func(childComplexity int) int
 	}
 }
 
 type EventResolver interface {
 	Links(ctx context.Context, obj *Event) ([]*Link, error)
+	Usage(ctx context.Context, obj *Event) (*TokenUsage, error)
+	StopReason(ctx context.Context, obj *Event) (*string, error)
 }
 type QueryResolver interface {
 	Event(ctx context.Context, id string) (*Event, error)
@@ -91,6 +110,9 @@ type QueryResolver interface {
 	SessionHead(ctx context.Context, sessionID string) (string, error)
 	Sessions(ctx context.Context, limit *int, since *time.Time) ([]*Session, error)
 	LinkedEvents(ctx context.Context, sessionID string, depth *int, perSessionLimit *int) ([]*Event, error)
+}
+type SessionResolver interface {
+	TotalUsage(ctx context.Context, obj *Session) (*TokenUsage, error)
 }
 
 type executableSchema graphql.ExecutableSchemaState[ResolverRoot, DirectiveRoot, ComplexityRoot]
@@ -186,6 +208,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Event.SessionID(childComplexity), true
+	case "Event.stopReason":
+		if e.ComplexityRoot.Event.StopReason == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Event.StopReason(childComplexity), true
 	case "Event.ts":
 		if e.ComplexityRoot.Event.Ts == nil {
 			break
@@ -198,6 +226,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Event.TurnID(childComplexity), true
+	case "Event.usage":
+		if e.ComplexityRoot.Event.Usage == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Event.Usage(childComplexity), true
 
 	case "Link.confidence":
 		if e.ComplexityRoot.Link.Confidence == nil {
@@ -311,6 +345,73 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Session.LastEventAt(childComplexity), true
+	case "Session.totalUsage":
+		if e.ComplexityRoot.Session.TotalUsage == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Session.TotalUsage(childComplexity), true
+
+	case "TokenUsage.cacheReadTokens":
+		if e.ComplexityRoot.TokenUsage.CacheReadTokens == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TokenUsage.CacheReadTokens(childComplexity), true
+	case "TokenUsage.cacheWrite1hTokens":
+		if e.ComplexityRoot.TokenUsage.CacheWrite1hTokens == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TokenUsage.CacheWrite1hTokens(childComplexity), true
+	case "TokenUsage.cacheWrite5mTokens":
+		if e.ComplexityRoot.TokenUsage.CacheWrite5mTokens == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TokenUsage.CacheWrite5mTokens(childComplexity), true
+	case "TokenUsage.inputTokens":
+		if e.ComplexityRoot.TokenUsage.InputTokens == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TokenUsage.InputTokens(childComplexity), true
+	case "TokenUsage.model":
+		if e.ComplexityRoot.TokenUsage.Model == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TokenUsage.Model(childComplexity), true
+	case "TokenUsage.outputTokens":
+		if e.ComplexityRoot.TokenUsage.OutputTokens == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TokenUsage.OutputTokens(childComplexity), true
+	case "TokenUsage.serviceTier":
+		if e.ComplexityRoot.TokenUsage.ServiceTier == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TokenUsage.ServiceTier(childComplexity), true
+	case "TokenUsage.vendor":
+		if e.ComplexityRoot.TokenUsage.Vendor == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TokenUsage.Vendor(childComplexity), true
+	case "TokenUsage.webFetchCalls":
+		if e.ComplexityRoot.TokenUsage.WebFetchCalls == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TokenUsage.WebFetchCalls(childComplexity), true
+	case "TokenUsage.webSearchCalls":
+		if e.ComplexityRoot.TokenUsage.WebSearchCalls == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TokenUsage.WebSearchCalls(childComplexity), true
 
 	}
 	return 0, false
@@ -436,6 +537,10 @@ func (ec *executionContext) childFields_Event(ctx context.Context, field graphql
 		return ec.fieldContext_Event_prevHash(ctx, field)
 	case "links":
 		return ec.fieldContext_Event_links(ctx, field)
+	case "usage":
+		return ec.fieldContext_Event_usage(ctx, field)
+	case "stopReason":
+		return ec.fieldContext_Event_stopReason(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type Event", field.Name)
 }
@@ -466,8 +571,36 @@ func (ec *executionContext) childFields_Session(ctx context.Context, field graph
 		return ec.fieldContext_Session_lastEventAt(ctx, field)
 	case "eventCount":
 		return ec.fieldContext_Session_eventCount(ctx, field)
+	case "totalUsage":
+		return ec.fieldContext_Session_totalUsage(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type Session", field.Name)
+}
+
+func (ec *executionContext) childFields_TokenUsage(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "vendor":
+		return ec.fieldContext_TokenUsage_vendor(ctx, field)
+	case "model":
+		return ec.fieldContext_TokenUsage_model(ctx, field)
+	case "serviceTier":
+		return ec.fieldContext_TokenUsage_serviceTier(ctx, field)
+	case "inputTokens":
+		return ec.fieldContext_TokenUsage_inputTokens(ctx, field)
+	case "outputTokens":
+		return ec.fieldContext_TokenUsage_outputTokens(ctx, field)
+	case "cacheReadTokens":
+		return ec.fieldContext_TokenUsage_cacheReadTokens(ctx, field)
+	case "cacheWrite5mTokens":
+		return ec.fieldContext_TokenUsage_cacheWrite5mTokens(ctx, field)
+	case "cacheWrite1hTokens":
+		return ec.fieldContext_TokenUsage_cacheWrite1hTokens(ctx, field)
+	case "webSearchCalls":
+		return ec.fieldContext_TokenUsage_webSearchCalls(ctx, field)
+	case "webFetchCalls":
+		return ec.fieldContext_TokenUsage_webFetchCalls(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type TokenUsage", field.Name)
 }
 
 func (ec *executionContext) childFields___Directive(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
@@ -1129,6 +1262,61 @@ func (ec *executionContext) fieldContext_Event_links(_ context.Context, field gr
 	return fc, nil
 }
 
+func (ec *executionContext) _Event_usage(ctx context.Context, field graphql.CollectedField, obj *Event) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Event_usage(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Event().Usage(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *TokenUsage) graphql.Marshaler {
+			return ec.marshalOTokenUsage2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐTokenUsage(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Event_usage(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Event",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_TokenUsage(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Event_stopReason(ctx context.Context, field graphql.CollectedField, obj *Event) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Event_stopReason(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Event().StopReason(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Event_stopReason(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Event", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
 func (ec *executionContext) _Link_fromEvent(ctx context.Context, field graphql.CollectedField, obj *Link) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -1630,6 +1818,268 @@ func (ec *executionContext) _Session_eventCount(ctx context.Context, field graph
 }
 func (ec *executionContext) fieldContext_Session_eventCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("Session", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _Session_totalUsage(ctx context.Context, field graphql.CollectedField, obj *Session) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Session_totalUsage(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Session().TotalUsage(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *TokenUsage) graphql.Marshaler {
+			return ec.marshalOTokenUsage2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐTokenUsage(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Session_totalUsage(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Session",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_TokenUsage(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TokenUsage_vendor(ctx context.Context, field graphql.CollectedField, obj *TokenUsage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_TokenUsage_vendor(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Vendor, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_TokenUsage_vendor(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("TokenUsage", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _TokenUsage_model(ctx context.Context, field graphql.CollectedField, obj *TokenUsage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_TokenUsage_model(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Model, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_TokenUsage_model(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("TokenUsage", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _TokenUsage_serviceTier(ctx context.Context, field graphql.CollectedField, obj *TokenUsage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_TokenUsage_serviceTier(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ServiceTier, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_TokenUsage_serviceTier(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("TokenUsage", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _TokenUsage_inputTokens(ctx context.Context, field graphql.CollectedField, obj *TokenUsage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_TokenUsage_inputTokens(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.InputTokens, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v int) graphql.Marshaler {
+			return ec.marshalNInt2int(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_TokenUsage_inputTokens(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("TokenUsage", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _TokenUsage_outputTokens(ctx context.Context, field graphql.CollectedField, obj *TokenUsage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_TokenUsage_outputTokens(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.OutputTokens, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v int) graphql.Marshaler {
+			return ec.marshalNInt2int(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_TokenUsage_outputTokens(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("TokenUsage", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _TokenUsage_cacheReadTokens(ctx context.Context, field graphql.CollectedField, obj *TokenUsage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_TokenUsage_cacheReadTokens(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CacheReadTokens, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *int) graphql.Marshaler {
+			return ec.marshalOInt2ᚖint(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_TokenUsage_cacheReadTokens(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("TokenUsage", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _TokenUsage_cacheWrite5mTokens(ctx context.Context, field graphql.CollectedField, obj *TokenUsage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_TokenUsage_cacheWrite5mTokens(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CacheWrite5mTokens, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *int) graphql.Marshaler {
+			return ec.marshalOInt2ᚖint(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_TokenUsage_cacheWrite5mTokens(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("TokenUsage", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _TokenUsage_cacheWrite1hTokens(ctx context.Context, field graphql.CollectedField, obj *TokenUsage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_TokenUsage_cacheWrite1hTokens(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CacheWrite1hTokens, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *int) graphql.Marshaler {
+			return ec.marshalOInt2ᚖint(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_TokenUsage_cacheWrite1hTokens(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("TokenUsage", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _TokenUsage_webSearchCalls(ctx context.Context, field graphql.CollectedField, obj *TokenUsage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_TokenUsage_webSearchCalls(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.WebSearchCalls, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *int) graphql.Marshaler {
+			return ec.marshalOInt2ᚖint(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_TokenUsage_webSearchCalls(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("TokenUsage", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _TokenUsage_webFetchCalls(ctx context.Context, field graphql.CollectedField, obj *TokenUsage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_TokenUsage_webFetchCalls(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.WebFetchCalls, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *int) graphql.Marshaler {
+			return ec.marshalOInt2ᚖint(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_TokenUsage_webFetchCalls(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("TokenUsage", field, false, false, errors.New("field of type Int does not have child fields"))
 }
 
 func (ec *executionContext) ___Directive_name(ctx context.Context, field graphql.CollectedField, obj *introspection.Directive) (ret graphql.Marshaler) {
@@ -2838,6 +3288,72 @@ func (ec *executionContext) _Event(ctx context.Context, sel ast.SelectionSet, ob
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "usage":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Event_usage(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "stopReason":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Event_stopReason(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -3091,23 +3607,122 @@ func (ec *executionContext) _Session(ctx context.Context, sel ast.SelectionSet, 
 		case "id":
 			out.Values[i] = ec._Session_id(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "firstEventAt":
 			out.Values[i] = ec._Session_firstEventAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "lastEventAt":
 			out.Values[i] = ec._Session_lastEventAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "eventCount":
 			out.Values[i] = ec._Session_eventCount(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "totalUsage":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Session_totalUsage(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferred), math.MaxInt32)))
+
+	for label, dfs := range deferred {
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var tokenUsageImplementors = []string{"TokenUsage"}
+
+func (ec *executionContext) _TokenUsage(ctx context.Context, sel ast.SelectionSet, obj *TokenUsage) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, tokenUsageImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("TokenUsage")
+		case "vendor":
+			out.Values[i] = ec._TokenUsage_vendor(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "model":
+			out.Values[i] = ec._TokenUsage_model(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "serviceTier":
+			out.Values[i] = ec._TokenUsage_serviceTier(ctx, field, obj)
+		case "inputTokens":
+			out.Values[i] = ec._TokenUsage_inputTokens(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "outputTokens":
+			out.Values[i] = ec._TokenUsage_outputTokens(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "cacheReadTokens":
+			out.Values[i] = ec._TokenUsage_cacheReadTokens(ctx, field, obj)
+		case "cacheWrite5mTokens":
+			out.Values[i] = ec._TokenUsage_cacheWrite5mTokens(ctx, field, obj)
+		case "cacheWrite1hTokens":
+			out.Values[i] = ec._TokenUsage_cacheWrite1hTokens(ctx, field, obj)
+		case "webSearchCalls":
+			out.Values[i] = ec._TokenUsage_webSearchCalls(ctx, field, obj)
+		case "webFetchCalls":
+			out.Values[i] = ec._TokenUsage_webFetchCalls(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -3948,6 +4563,13 @@ func (ec *executionContext) marshalOTime2ᚖtimeᚐTime(ctx context.Context, sel
 	_ = ctx
 	res := graphql.MarshalTime(*v)
 	return res
+}
+
+func (ec *executionContext) marshalOTokenUsage2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐTokenUsage(ctx context.Context, sel ast.SelectionSet, v *TokenUsage) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._TokenUsage(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalO__EnumValue2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐEnumValueᚄ(ctx context.Context, sel ast.SelectionSet, v []introspection.EnumValue) graphql.Marshaler {

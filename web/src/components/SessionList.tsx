@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { gql, sessionsQuery } from "../api/client";
 import type { Session, SessionsResponse } from "../types";
+import { TokenUsageChip } from "./TokenUsageChip";
 
 export function SessionList({
   onSelect,
@@ -76,8 +77,17 @@ function SessionRow({
             {formatAbsolute(session.firstEventAt)}
           </div>
         </div>
-        <div className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700">
-          {session.eventCount} {session.eventCount === 1 ? "event" : "events"}
+        <div className="flex shrink-0 items-center gap-2">
+          {session.totalUsage && (
+            <TokenUsageChip
+              usage={session.totalUsage}
+              ariaLabelPrefix="session total: "
+            />
+          )}
+          <div className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700">
+            {session.eventCount}{" "}
+            {session.eventCount === 1 ? "event" : "events"}
+          </div>
         </div>
       </button>
     </li>

@@ -2,6 +2,7 @@ import { lazy, Suspense, useMemo, useState } from "react";
 import type { Event } from "../types";
 import { styleFor, formatTimestamp } from "./kindStyle";
 import { payloadToDiff } from "../lib/payloadToDiff";
+import { TokenUsageChip } from "./TokenUsageChip";
 
 // React.lazy keeps the ~600 KB Monaco bundle out of the eager chunk:
 // users who never expand a diff never pay for it. The dynamic import
@@ -79,6 +80,12 @@ export function EventCard({ event }: { event: Event }) {
                 </span>
               ) : null;
             })()}
+            {event.usage && (
+              <TokenUsageChip
+                usage={event.usage}
+                stopReason={event.stopReason}
+              />
+            )}
             {event.links?.length > 0 && (
               <span
                 className="inline-flex items-center gap-0.5 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 ring-1 ring-zinc-300"
