@@ -4,11 +4,7 @@ import { gql, eventsQuery } from "../api/client";
 import type { Event, EventKind, EventsResponse, TokenUsage } from "../types";
 import { EventCard } from "./EventCard";
 import { styleFor } from "./kindStyle";
-import {
-  compactNum,
-  tokenUsageAriaLabel,
-  tokenUsageTooltip,
-} from "../lib/tokenUsage";
+import { TokenUsageChip } from "./TokenUsageChip";
 
 export function Timeline({ sessionId }: { sessionId: string }) {
   const [activeKinds, setActiveKinds] = useState<Set<EventKind>>(new Set());
@@ -77,26 +73,11 @@ export function Timeline({ sessionId }: { sessionId: string }) {
             head {data.sessionHead ? data.sessionHead.slice(0, 16) : "(empty)"}
           </div>
           {usageTotal && (
-            <div
-              className="inline-flex items-center gap-1 rounded bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-900 ring-1 ring-violet-200 font-mono"
-              title={tokenUsageTooltip(usageTotal) + "\n\n(across fetched events; SessionList shows session truth-of-record)"}
-              aria-label={
-                "fetched-events total: " + tokenUsageAriaLabel(usageTotal)
-              }
-            >
-              <span aria-hidden>↑</span>
-              <span>{compactNum(usageTotal.inputTokens)}</span>
-              <span aria-hidden>↓</span>
-              <span>{compactNum(usageTotal.outputTokens)}</span>
-              {usageTotal.cacheReadTokens != null &&
-                usageTotal.cacheReadTokens > 0 && (
-                  <>
-                    <span className="text-violet-400">·</span>
-                    <span aria-label="cache read">◊</span>
-                    <span>{compactNum(usageTotal.cacheReadTokens)}</span>
-                  </>
-                )}
-            </div>
+            <TokenUsageChip
+              usage={usageTotal}
+              ariaLabelPrefix="fetched-events total: "
+              caveatNote="(across fetched events; SessionList shows session truth-of-record)"
+            />
           )}
           {isFetching && (
             <div className="text-xs text-zinc-400">refreshing…</div>

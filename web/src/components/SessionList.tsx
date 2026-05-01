@@ -1,11 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { gql, sessionsQuery } from "../api/client";
 import type { Session, SessionsResponse } from "../types";
-import {
-  compactNum,
-  tokenUsageAriaLabel,
-  tokenUsageTooltip,
-} from "../lib/tokenUsage";
+import { TokenUsageChip } from "./TokenUsageChip";
 
 export function SessionList({
   onSelect,
@@ -83,26 +79,10 @@ function SessionRow({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {session.totalUsage && (
-            <div
-              className="inline-flex items-center gap-1 rounded bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-900 ring-1 ring-violet-200 font-mono"
-              title={tokenUsageTooltip(session.totalUsage)}
-              aria-label={
-                "session total: " + tokenUsageAriaLabel(session.totalUsage)
-              }
-            >
-              <span aria-hidden>↑</span>
-              <span>{compactNum(session.totalUsage.inputTokens)}</span>
-              <span aria-hidden>↓</span>
-              <span>{compactNum(session.totalUsage.outputTokens)}</span>
-              {session.totalUsage.cacheReadTokens != null &&
-                session.totalUsage.cacheReadTokens > 0 && (
-                  <>
-                    <span className="text-violet-400">·</span>
-                    <span aria-label="cache read">◊</span>
-                    <span>{compactNum(session.totalUsage.cacheReadTokens)}</span>
-                  </>
-                )}
-            </div>
+            <TokenUsageChip
+              usage={session.totalUsage}
+              ariaLabelPrefix="session total: "
+            />
           )}
           <div className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700">
             {session.eventCount}{" "}
