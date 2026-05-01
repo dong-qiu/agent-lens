@@ -78,6 +78,10 @@ type Session struct {
 // values (see Session.totalUsage docs). Cache and server-tool fields are
 // optional because some vendors (e.g. OpenAI) don't have a directly
 // comparable concept.
+//
+// The original verbatim vendor `usage` block is intentionally NOT
+// projected onto this typed surface — clients that need it for forensic
+// re-parse can read `Event.payload.usage.raw` from the JSON payload.
 type TokenUsage struct {
 	Vendor             string  `json:"vendor"`
 	Model              string  `json:"model"`
