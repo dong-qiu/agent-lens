@@ -190,11 +190,13 @@ func makeStopEvents(in *claudeHookInput) ([]map[string]any, func() error) {
 	for _, b := range blocks {
 		switch b.Kind {
 		case "thinking":
-			events = append(events, baseEvent(in, agentActorWithModel(b.Model), "thought", map[string]any{
+			payload := map[string]any{
 				"text":       b.Content, // TODO: redact per SPEC §12 before forwarding
 				"message_id": b.MessageID,
 				"source":     "transcript",
-			}))
+			}
+			attachUsageMetadata(payload, &b)
+			events = append(events, baseEvent(in, agentActorWithModel(b.Model), "thought", payload))
 		case "text":
 			payload := map[string]any{
 				"marker":     "assistant_message",
@@ -208,6 +210,7 @@ func makeStopEvents(in *claudeHookInput) ([]map[string]any, func() error) {
 			if b.RedactedThinking > 0 {
 				payload["thinking_redacted_by_claude_code"] = b.RedactedThinking
 			}
+			attachUsageMetadata(payload, &b)
 			events = append(events, baseEvent(in, agentActorWithModel(b.Model), "decision", payload))
 		}
 	}
@@ -215,6 +218,19 @@ func makeStopEvents(in *claudeHookInput) ([]map[string]any, func() error) {
 
 	commit := func() error { return r.Commit(in.SessionID, offset) }
 	return events, commit
+}
+
+// attachUsageMetadata copies per-message usage / stop_reason from the
+// transcript block onto the event payload. The reader attaches both to
+// a single carrier block per message so this won't double-count in
+// turn / session aggregation; see ADR 0002 D1.
+func attachUsageMetadata(payload map[string]any, b *transcript.Block) {
+	if b.Usage != nil {
+		payload["usage"] = b.Usage
+	}
+	if b.StopReason != "" {
+		payload["stop_reason"] = b.StopReason
+	}
 }
 
 func baseEvent(in *claudeHookInput, actor map[string]any, kind string, payload map[string]any) map[string]any {

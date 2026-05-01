@@ -8,12 +8,39 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+// TokenUsage is the vendor-neutral token-counting shape per ADR 0002 D2.
+// Field names match the JSON keys the hook will emit on payload.usage so
+// downstream readers (GraphQL, audit dashboards, attestation predicates)
+// don't need a second mapping layer.
+//
+// Optional cache + server_tool fields use omitempty so a vendor that
+// doesn't have a notion of cache writes (e.g. OpenAI) just omits them
+// rather than reporting zeros that look like real-but-empty buckets.
+type TokenUsage struct {
+	Vendor             string          `json:"vendor"`
+	Model              string          `json:"model"`
+	ServiceTier        string          `json:"service_tier,omitempty"`
+	InputTokens        int             `json:"input_tokens"`
+	OutputTokens       int             `json:"output_tokens"`
+	CacheReadTokens    int             `json:"cache_read_tokens,omitempty"`
+	CacheWrite5mTokens int             `json:"cache_write_5m_tokens,omitempty"`
+	CacheWrite1hTokens int             `json:"cache_write_1h_tokens,omitempty"`
+	WebSearchCalls     int             `json:"web_search_calls,omitempty"`
+	WebFetchCalls      int             `json:"web_fetch_calls,omitempty"`
+	// Raw is the verbatim vendor `usage` block, kept so we can re-derive
+	// fields if our normalization missed a column or if Anthropic's
+	// schema drifts. ADR 0002 D2 calls this "有意冗余" — a few hundred
+	// bytes per event in exchange for forensic resilience.
+	Raw json.RawMessage `json:"raw,omitempty"`
+}
 
 // Block is a single content block extracted from one assistant message.
 //
@@ -24,12 +51,19 @@ import (
 // `assistant_message` DECISION event can surface it; thinking blocks
 // themselves do not carry the count to avoid mis-attributing the
 // redaction signal to the THOUGHT event.
+//
+// Usage and StopReason are message-level metadata (ADR 0002 D1). They
+// attach to a single carrier block per message to avoid double-counting
+// in turn / session aggregation. Carrier preference: first text block,
+// then first thinking block, else a synthesized stub text block.
 type Block struct {
 	Kind             string // "thinking" or "text"
 	Content          string
 	MessageID        string
 	Model            string
 	RedactedThinking int
+	Usage            *TokenUsage
+	StopReason       string
 }
 
 // Reader reads new content from a transcript file since the last
@@ -116,15 +150,92 @@ type transcriptEntry struct {
 }
 
 type assistantMessage struct {
-	ID      string          `json:"id"`
-	Content json.RawMessage `json:"content"`
-	Model   string          `json:"model"`
+	ID         string          `json:"id"`
+	Content    json.RawMessage `json:"content"`
+	Model      string          `json:"model"`
+	StopReason string          `json:"stop_reason"`
+	Usage      json.RawMessage `json:"usage"`
 }
 
 type contentBlock struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
 	Thinking string `json:"thinking,omitempty"`
+}
+
+// rawUsage mirrors the Anthropic `message.usage` shape we read from the
+// transcript. Fields kept private; the public projection is TokenUsage.
+type rawUsage struct {
+	InputTokens              int    `json:"input_tokens"`
+	OutputTokens             int    `json:"output_tokens"`
+	CacheCreationInputTokens int    `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int    `json:"cache_read_input_tokens"`
+	ServiceTier              string `json:"service_tier"`
+	CacheCreation            struct {
+		Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+		Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
+	ServerToolUse struct {
+		WebSearchRequests int `json:"web_search_requests"`
+		WebFetchRequests  int `json:"web_fetch_requests"`
+	} `json:"server_tool_use"`
+}
+
+// allZero reports whether every numeric / counter field is 0. Used to
+// detect "metadata-only" messages per ADR 0002 D3 (the second branch:
+// `usage` 里所有数值字段都为零).
+func (u rawUsage) allZero() bool {
+	return u.InputTokens == 0 &&
+		u.OutputTokens == 0 &&
+		u.CacheCreationInputTokens == 0 &&
+		u.CacheReadInputTokens == 0 &&
+		u.CacheCreation.Ephemeral5mInputTokens == 0 &&
+		u.CacheCreation.Ephemeral1hInputTokens == 0 &&
+		u.ServerToolUse.WebSearchRequests == 0 &&
+		u.ServerToolUse.WebFetchRequests == 0
+}
+
+// extractUsage applies ADR 0002 D2 mapping. Returns nil for metadata-only
+// messages per D3: `<synthetic>` model marker, missing/null usage block,
+// or all-zero numeric fields. INFO-logs each metadata-only detection so
+// future Claude-Code versions that start populating these messages with
+// real numbers don't get silently skipped (D3 hedge rationale).
+func extractUsage(model string, usageRaw json.RawMessage) *TokenUsage {
+	if model == "<synthetic>" {
+		fmt.Fprintf(os.Stderr, "transcript INFO: metadata-only message (model=<synthetic>); skipping usage\n")
+		return nil
+	}
+	if len(usageRaw) == 0 || string(usageRaw) == "null" {
+		// Missing / null usage is silenced. ADR 0002 D3's INFO-log
+		// hedge targets cases where we *have* data and skip it (so a
+		// future Claude Code version that fills these in with real
+		// numbers doesn't get silently ignored). With no data present
+		// there's nothing to silently skip; logging here would only
+		// add noise without buying any forward-detection signal.
+		return nil
+	}
+	var u rawUsage
+	if err := json.Unmarshal(usageRaw, &u); err != nil {
+		fmt.Fprintf(os.Stderr, "transcript INFO: usage decode failed (%v); skipping\n", err)
+		return nil
+	}
+	if u.allZero() {
+		fmt.Fprintf(os.Stderr, "transcript INFO: metadata-only message (all-zero usage, model=%q); skipping\n", model)
+		return nil
+	}
+	return &TokenUsage{
+		Vendor:             "anthropic",
+		Model:              model,
+		ServiceTier:        u.ServiceTier,
+		InputTokens:        u.InputTokens,
+		OutputTokens:       u.OutputTokens,
+		CacheReadTokens:    u.CacheReadInputTokens,
+		CacheWrite5mTokens: u.CacheCreation.Ephemeral5mInputTokens,
+		CacheWrite1hTokens: u.CacheCreation.Ephemeral1hInputTokens,
+		WebSearchCalls:     u.ServerToolUse.WebSearchRequests,
+		WebFetchCalls:      u.ServerToolUse.WebFetchRequests,
+		Raw:                usageRaw,
+	}
 }
 
 func parseLine(line []byte) []Block {
@@ -176,29 +287,78 @@ func parseLine(line []byte) []Block {
 			out = append(out, Block{Kind: "text", Content: b.Text, MessageID: msg.ID, Model: msg.Model})
 		}
 	}
+	// Per-message metadata (ADR 0002 D1: usage and stop_reason are
+	// properties of the assistant message, not of any one derived
+	// event). Attach to a single carrier block to avoid double-counting
+	// in turn / session aggregation.
+	usage := extractUsage(msg.Model, msg.Usage)
+	stopReason := msg.StopReason
+
+	needsCarrier := redactedThinking > 0 || usage != nil || stopReason != ""
+	if !needsCarrier {
+		return out
+	}
+
+	// redacted_thinking is a property of the *assistant_message*
+	// marker — attaching it to a THOUGHT event would mis-categorize
+	// the audit signal — so it strictly wants a text-block carrier
+	// (synthesizing a stub if needed).
 	if redactedThinking > 0 {
-		// Attach the count to the first text block so the
-		// `assistant_message` DECISION carries it. If the message had
-		// only redacted thinking (no text), emit a stub text block
-		// so the DECISION still fires; downstream UI shows just the
-		// "redacted" pill in that case.
-		attached := false
+		textIdx := -1
 		for i := range out {
 			if out[i].Kind == "text" {
-				out[i].RedactedThinking = redactedThinking
-				attached = true
+				textIdx = i
 				break
 			}
 		}
-		if !attached {
+		if textIdx < 0 {
 			out = append(out, Block{
-				Kind:             "text",
-				MessageID:        msg.ID,
-				Model:            msg.Model,
-				RedactedThinking: redactedThinking,
+				Kind:      "text",
+				MessageID: msg.ID,
+				Model:     msg.Model,
 			})
+			textIdx = len(out) - 1
+		}
+		out[textIdx].RedactedThinking = redactedThinking
+	}
+
+	// usage / stop_reason are message-level metadata that read fine on
+	// either DECISION or THOUGHT, so they can ride a thinking block
+	// when no text exists rather than forcing a stub. Falls through to
+	// a stub only when the message has no derived events at all (e.g.
+	// tool-use only) — we still want to capture the usage in that case.
+	if usage != nil || stopReason != "" {
+		target := -1
+		for i := range out {
+			if out[i].Kind == "text" {
+				target = i
+				break
+			}
+		}
+		if target < 0 {
+			for i := range out {
+				if out[i].Kind == "thinking" {
+					target = i
+					break
+				}
+			}
+		}
+		if target < 0 {
+			out = append(out, Block{
+				Kind:      "text",
+				MessageID: msg.ID,
+				Model:     msg.Model,
+			})
+			target = len(out) - 1
+		}
+		if usage != nil {
+			out[target].Usage = usage
+		}
+		if stopReason != "" {
+			out[target].StopReason = stopReason
 		}
 	}
+
 	return out
 }
 
