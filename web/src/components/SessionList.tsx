@@ -1,7 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { gql, sessionsQuery } from "../api/client";
 import type { Session, SessionsResponse } from "../types";
-import { compactNum, tokenUsageTooltip } from "../lib/tokenUsage";
+import {
+  compactNum,
+  tokenUsageAriaLabel,
+  tokenUsageTooltip,
+} from "../lib/tokenUsage";
 
 export function SessionList({
   onSelect,
@@ -82,6 +86,9 @@ function SessionRow({
             <div
               className="inline-flex items-center gap-1 rounded bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-900 ring-1 ring-violet-200 font-mono"
               title={tokenUsageTooltip(session.totalUsage)}
+              aria-label={
+                "session total: " + tokenUsageAriaLabel(session.totalUsage)
+              }
             >
               <span aria-hidden>↑</span>
               <span>{compactNum(session.totalUsage.inputTokens)}</span>

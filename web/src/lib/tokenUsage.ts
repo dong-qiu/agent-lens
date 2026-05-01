@@ -23,6 +23,22 @@ export function compactNum(n: number | null | undefined): string {
   return `${(n / 1_000_000_000).toFixed(1)}B`;
 }
 
+// tokenUsageAriaLabel describes the chip in plain language for screen
+// readers — the visible chip uses arrows + symbols (`↑↓◊`) hidden via
+// `aria-hidden`, which would otherwise render as bare numbers without
+// context. Audit / compliance users may rely on assistive tech, so this
+// is load-bearing accessibility, not decoration.
+export function tokenUsageAriaLabel(usage: TokenUsage): string {
+  const parts = [
+    `input ${usage.inputTokens.toLocaleString()} tokens`,
+    `output ${usage.outputTokens.toLocaleString()} tokens`,
+  ];
+  if (usage.cacheReadTokens) {
+    parts.push(`cache read ${usage.cacheReadTokens.toLocaleString()} tokens`);
+  }
+  return parts.join(", ");
+}
+
 // tokenUsageTooltip builds the full breakdown shown when hovering over
 // the per-message token chip. Reads cleanly across two columns of
 // label/value, never folds cache_read into input (per ADR 0002 line 47:
