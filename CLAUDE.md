@@ -30,6 +30,16 @@ These were settled during initial scoping and are referenced throughout `SPEC.md
 - Architecture decisions live in `docs/ADR/` (see `docs/ADR/README.md` for the SPEC vs ADR vs Patch mechanism). Accepted ADRs are append-only — propose a new ADR rather than editing one in place. Non-trivial design choices (new EventKind, schema change, irreversible tech selection) should land as a draft ADR before code.
 - Common commands are wired in the `Makefile`: `make build`, `make proto`, `make gqlgen`, `make test`, `make test-integration`, `make migrate-up`, `make compose-up`, `make web-dev`, `make web-build`. `make help` lists them all.
 
+## Self-review before merge
+
+**Run `/self-review` before submitting any self-review summary or merging a PR.** The skill (in `.claude/skills/self-review/SKILL.md`) runs the mechanical pass automatically (git staging hygiene, codegen drift, tests, typecheck, debug-marker scan), walks the judgment-pass prompts, recommends `/review` or `/ultrareview` escalation when the PR warrants it, and ends with an explicit "what this review didn't cover" disclaimer.
+
+The skill exists because passive checklists (this file alone) didn't prevent the failure modes that motivated it — codegen drift, accidental file inclusion, repeated UX misses. Mechanical hygiene is enforced by code that runs, not docs that have to be remembered.
+
+**Self-review structurally cannot cover** UX latency, visual rendering, layout shift, or perception. Static analysis won't see a 700 ms tooltip delay or a misaligned chip. The skill surfaces these as explicit "manual smoke needed" handoffs to the user — not as items the review claims to subsume.
+
+**Post-merge calibration**: if CI catches something `/self-review` missed, add a check to the skill's Phase 1. The next contributor (or future-me) inherits the lesson via skill update, not by reading docs.
+
 ## Local development with persistence
 
 The collector defaults to `AGENT_LENS_STORE=postgres`. To run the dogfood loop with data that survives restarts:
