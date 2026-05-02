@@ -33,3 +33,7 @@ deploy/compose/.data/
 
 # Backups
 /backups/
+
+# Claude Code runtime (per-developer; never commit)
+.claude/settings.local.json
+.claude/worktrees/
