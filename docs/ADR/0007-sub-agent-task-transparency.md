@@ -1,7 +1,7 @@
 # ADR 0007:Sub-agent(Task 工具)透明度
 
 - 状态:草案
-- 日期:2026-05-03
+- 日期:2026-05-04
 - 取代:—
 - 修订(待 Accepted):none —— 本 ADR 在 §10.1 hook 路径既有事件类型上加一条 `Link.relation` 与一种新的链接产生途径,不改 SPEC §6/§7 数据模型;实施 PR 落地 §10.1 时同 PR 对 SPEC §10.1 已知局限段补充一句即可,无需打 SPEC patch。
 
@@ -79,21 +79,9 @@ SPEC §7 现有 relation 词表为 `produces / references / reviews / builds / d
 为了让未来读者不疑惑"这条 ADR 为什么没做 X",留档:
 
 - **Lens UI 嵌套 sub-agent 时间线 / 因果图渲染**。v0.1 中 sub-agent 在 SessionList 里以平铺独立 session 出现,只有列表上方显示一个"delegated by ←"的小 link chip 即可;真正的 nested timeline / collapsible tree 留给 v0.2。
-- **递归 sub-agent 捕获深度 > 3**。理论上 sub-agent 能再起 sub-agent。v0.1 在 hook 端硬上限 depth=3,超出深度记一行 stderr warning 并继续派生(不阻断 Claude Code 行为),不 emit `delegates`。深度上限的产品理由是"4 层以上几乎一定是配置错误或失控循环",不是 schema 限制。
+- **递归 sub-agent 捕获深度 > 3**。理论上 sub-agent 能再起 sub-agent。hook 是 observer 不是 gatekeeper —— 不能"上限派生",Claude Code 怎么派生它就怎么记。v0.1 hook 在事件 payload 标 depth;**超过 3 时打 stderr warning 仍正常上报事件,但不 emit `delegates` 链接**(避免审计图爆炸)。深度阈值的产品理由是"4 层以上几乎一定是配置错误或失控循环",不是 schema 限制。
 - **同父兄弟 sub-agent peer linking**。同一主会话的多个 Task 调用之间是否需要 sibling link(`co_delegated`?)留给 v0.2,因为目前没有审计场景需要"兄弟"这层语义。
 - **基于 policy 的 sub-agent 派生拦截**。"在 PreToolUse 时按 policy 阻断某些 Task 调用"属 §10.4 代理深模式范畴(需要实时拦截能力),与本 ADR 的捕获语义独立,由独立 ADR 类拍板。
-
-## Scope
-
-本 ADR 只做文档与 schema 决策。落地涉及:
-
-- `cmd/agent-lens-hook/setup.go`:`setup --personal` 默认写 `~/.claude/settings.json`(D1);新增 `--project-only` flag。
-- `cmd/agent-lens-hook/claude.go`:SessionStart handler 读 `AGENT_LENS_PARENT_EVENT_ID` env(D3-A);PreToolUse(Task)handler 把自身 event id 通过子进程 env 传出;PostToolUse(Task)handler 在 tool_result payload 含 child session_id 时 emit 父→子 link 兜底(D3-C)。
-- `internal/linking/relation.go`:加 `RelationDelegates` 常量与对应 `InferRelation` 规则(D4)。
-- `internal/linking/linker.go`:接受 SessionStart payload 中的 parent event id 作为新链接产生途径,与现有 ref-based 路径并存。
-- SPEC §10.1 已知局限段:加一句对应文案(实施 PR 同 commit 改)。
-
-**本 ADR 不带任何代码改动**。
 
 ## 后果
 
@@ -114,7 +102,12 @@ SPEC §7 现有 relation 词表为 `produces / references / reviews / builds / d
 
 按 D1..D5 拆分的实施 PR 清单,每条独立可 review:
 
-1. **实施 PR(D1+D2+D3+D4)**:`agent-lens-hook setup --personal` 默认写用户级 + `--project-only` flag(D1);child session_id 直接采用 Claude Code 给的 id(D2);D3-A env var 直传机制 + D3-C tool_result 兜底机制,实测后保留能跑的部分(D3);linker 加 `delegates` relation 与对应 `InferRelation` 规则(D4)。同 PR 在 SPEC §10.1 已知局限段加一句对应文案。
+1. **实施 PR(D1+D2+D3+D4)**:`agent-lens-hook setup --personal` 默认写用户级 + `--project-only` flag(D1);child session_id 直接采用 Claude Code 给的 id(D2);D3-A env var 直传机制 + D3-C tool_result 兜底机制,实测后保留能跑的部分(D3);linker 加 `delegates` relation 与对应 `InferRelation` 规则(D4)。同 PR 在 SPEC §10.1 已知局限段加一句对应文案。落地涉及:
+   - `cmd/agent-lens-hook/setup.go`(或 setup --personal 实施 PR 引入的等价文件):D1 的默认路径与 `--project-only` flag。
+   - `cmd/agent-lens-hook/claude.go`:SessionStart handler 读 `AGENT_LENS_PARENT_EVENT_ID` env(D3-A);PreToolUse(Task)handler 把自身 event id 通过子进程 env 传出;PostToolUse(Task)handler 在 tool_result payload 含 child session_id 时 emit 父→子 link 兜底(D3-C)。
+   - `internal/linking/relation.go`:`RelationDelegates` 常量 + 对应 `InferRelation` 规则(D4)。
+   - `internal/linking/linker.go`:接受 SessionStart payload 中的 parent event id 作为新链接产生途径,与现有 ref-based 路径并存。
+   - `SPEC.md` §10.1 已知局限段:加一句对应文案(同 commit 改)。
 2. **README/ADR 0006 措辞校对(可能不需要)**:实施 PR 完成时核对 README 的 setup 演示与 ADR 0006 D8 措辞,若与"默认用户级、`--project-only` 是 escape hatch"叙事不一致再补丁;若已一致(很可能)则跳过。
 3. **v0.2 后续 ADR(不在本 ADR 范围)**:Lens UI 嵌套 sub-agent timeline 渲染设计;同父兄弟 sub-agent peer link 语义;§10.4 代理深模式拍板时附带的 policy gate 对 sub-agent 派生的拦截策略。
 
