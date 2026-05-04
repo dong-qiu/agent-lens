@@ -103,7 +103,11 @@ agent-lens-hook keygen
 - `agent-lens-hook export slsa-build` → 标准 SLSA Build Track v1
 - `agent-lens-hook export deploy-evidence` → predicateType `agent-lens.dev/deploy-evidence/v1`
 
-每条命令产出一个 DSSE 信封 `.intoto.jsonl`，cosign 兼容。Predicate 里只放 thinking / prompt 的 sha256 + 200 字预览 + token 数；全文留 agent-lens 存储里——签了就难撤回，敏感内容上链得万分谨慎。
+每条命令产出一个 DSSE 信封 `.intoto.jsonl`，签名格式标准（in-toto v1 Statement，DSSE envelope，ed25519）。**官方校验路径用 `agent-lens-hook verify-attestation`**——验签 + predicateType 检查 + subject 显示一气呵成。
+
+cosign 兼容性**部分**：DSSE envelope 与签名本身 cosign 能识别，但 `cosign verify-blob-attestation` 不能直接跑，因为本工具的 in-toto subject 用 `gitCommit` digest 类型（in-toto v1.1 标准给 git commit 的算法），而 cosign 假设 subject 是 sha256 over a blob。如果一定要走 cosign，先抽出 raw 签名 + 构造 DSSE PAE blob，再 `cosign verify-blob --signature <sig> --insecure-ignore-tlog <pae-blob>` —— 详见 [§ Cosign 兼容性](#cosign-兼容性) 段。v0.2 路线考虑加 sha256 alias 或 `cosign-format` 助手，让一键命令工作。
+
+Predicate 里只放 thinking / prompt 的 sha256 + 200 字预览 + token 数；全文留 agent-lens 存储里——签了就难撤回，敏感内容上链得万分谨慎。
 
 ### 导出 code-provenance（commit 边界）
 
@@ -202,7 +206,43 @@ agent-lens-hook verify-attestation deploy.intoto.jsonl \
 
 `--pub` 默认 `$HOME/.agent-lens/keys/ed25519.pub`。
 
-DSSE envelope 是标准格式，cosign / sigstore-go 都能识别——agent-lens 用同一份 ed25519 公钥（PEM/PKIX）签 + 验。把 `.intoto.jsonl` 的 payload (base64) 解出来再喂给第三方工具即可；后续若启用 Sigstore 网络模式（Fulcio + Rekor），`verify-attestation` 会扩展 `--rekor-url` 等 flag，envelope 格式不变。
+DSSE envelope 是标准 in-toto v1 + DSSE v1，结构（`payloadType` / `payload` / `signatures[].sig`）兼容 sigstore 工具栈。agent-lens 用同一份 ed25519 公钥（PEM/PKIX）签 + 验，所以下游脚本也可以读 `.intoto.jsonl` 解 payload (base64) 自己处理。后续若启用 Sigstore 网络模式（Fulcio + Rekor），`verify-attestation` 会扩展 `--rekor-url` 等 flag，envelope 格式不变。
+
+## Cosign 兼容性
+
+v0.1 与 cosign 的关系是**部分兼容**：
+
+| 路径 | 状态 | 备注 |
+|---|---|---|
+| `agent-lens-hook verify-attestation` | ✅ 推荐 | 验签 + predicateType 校验 + subject 显示 一气呵成 |
+| `cosign verify-blob-attestation` (code-provenance / deploy-evidence) | ❌ | subject digest 用 `gitCommit` 或 image，cosign 假设 sha256 over blob，subject linkage 失败 |
+| `cosign verify-blob-attestation` (slsa-build) | ⏳ 未测 | SLSA Build subject 用 sha256 artifact digests，理论上 cosign 应能跑；v0.1 没在 CI 验证，留给 v0.2 |
+| `cosign verify-blob` 抽 raw 签名 + DSSE PAE blob | ✅ workaround | 见下方 recipe；`Verified OK` 已实测过 |
+
+**手动 cosign 校验 recipe**（如果你 audit pipeline 已经在用 cosign）：
+
+```bash
+ATT=path/to/code-prov.intoto.jsonl
+PUB=$HOME/.agent-lens/keys/ed25519.pub
+
+# 1. 抽出 raw 签名（base64）
+python3 -c "import json; print(json.load(open('$ATT'))['signatures'][0]['sig'])" > sig.b64
+
+# 2. 构造 DSSE PAE blob（cosign 这一步只验签，不做 subject linkage）
+python3 -c "
+import json, base64, sys
+e = json.load(open('$ATT'))
+pt = e['payloadType']
+p = base64.b64decode(e['payload'])
+sys.stdout.buffer.write(f'DSSEv1 {len(pt)} {pt} {len(p)} '.encode() + p)
+" > pae.bin
+
+# 3. cosign verify-blob
+cosign verify-blob --key "$PUB" --signature sig.b64 --insecure-ignore-tlog pae.bin
+# Verified OK
+```
+
+**v0.2 路线**（[#75](https://github.com/dong-qiu/agent-lens/issues/75)）：考虑给 subject 加 sha256 alias 或新增 `agent-lens-hook cosign-format` 助手，让 `cosign verify-blob-attestation` 一键能跑。
 
 ## 校验哈希链
 
