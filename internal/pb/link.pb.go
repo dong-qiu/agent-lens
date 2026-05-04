@@ -180,7 +180,7 @@ const file_link_proto_rawDesc = "" +
 	"\x13RELATION_REFERENCES\x10\x02\x12\x14\n" +
 	"\x10RELATION_REVIEWS\x10\x03\x12\x13\n" +
 	"\x0fRELATION_BUILDS\x10\x04\x12\x14\n" +
-	"\x10RELATION_DEPLOYS\x10\x05B.Z,github.com/dongqiu/agent-lens/internal/pb;pbb\x06proto3"
+	"\x10RELATION_DEPLOYS\x10\x05B/Z-github.com/dong-qiu/agent-lens/internal/pb;pbb\x06proto3"
 
 var (
 	file_link_proto_rawDescOnce sync.Once

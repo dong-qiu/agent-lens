@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dongqiu/agent-lens/internal/attest"
-	"github.com/dongqiu/agent-lens/internal/audit"
+	"github.com/dong-qiu/agent-lens/internal/attest"
+	"github.com/dong-qiu/agent-lens/internal/audit"
 )
 
 const auditReportUsage = `agent-lens-hook export audit-report — bundle the

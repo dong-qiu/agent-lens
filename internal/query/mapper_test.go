@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/dongqiu/agent-lens/internal/store"
+	"github.com/dong-qiu/agent-lens/internal/store"
 )
 
 func TestDecodePayloadUsage_Present(t *testing.T) {

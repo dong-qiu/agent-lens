@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dongqiu/agent-lens/internal/attest"
+	"github.com/dong-qiu/agent-lens/internal/attest"
 )
 
 const verifyAttestationUsage = `agent-lens-hook verify-attestation — verify a

@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dongqiu/agent-lens/internal/attest"
+	"github.com/dong-qiu/agent-lens/internal/attest"
 )
 
 // DecodeReport unmarshals a report file with UseNumber so payload

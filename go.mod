@@ -1,4 +1,4 @@
-module github.com/dongqiu/agent-lens
+module github.com/dong-qiu/agent-lens
 
 go 1.25.0
 

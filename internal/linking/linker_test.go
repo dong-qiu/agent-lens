@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dongqiu/agent-lens/internal/ingest"
-	"github.com/dongqiu/agent-lens/internal/store"
+	"github.com/dong-qiu/agent-lens/internal/ingest"
+	"github.com/dong-qiu/agent-lens/internal/store"
 )
 
 func appendEvent(t *testing.T, st store.Store, id string, refs []string) {

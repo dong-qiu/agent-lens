@@ -10,9 +10,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/dongqiu/agent-lens/internal/ingest"
-	"github.com/dongqiu/agent-lens/internal/query"
-	"github.com/dongqiu/agent-lens/internal/store"
+	"github.com/dong-qiu/agent-lens/internal/ingest"
+	"github.com/dong-qiu/agent-lens/internal/query"
+	"github.com/dong-qiu/agent-lens/internal/store"
 )
 
 // fakeGQL is a tiny stand-in that decodes the verify query, looks the

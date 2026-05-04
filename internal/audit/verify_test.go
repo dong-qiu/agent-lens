@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dongqiu/agent-lens/internal/attest"
+	"github.com/dong-qiu/agent-lens/internal/attest"
 )
 
 // makeReport returns a tiny, internally-consistent Report that

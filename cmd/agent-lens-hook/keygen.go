@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dongqiu/agent-lens/internal/attest"
+	"github.com/dong-qiu/agent-lens/internal/attest"
 )
 
 const keygenUsage = `agent-lens-hook keygen — generate an ed25519 key pair for

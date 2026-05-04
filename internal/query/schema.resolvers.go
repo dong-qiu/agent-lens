@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dongqiu/agent-lens/internal/store"
+	"github.com/dong-qiu/agent-lens/internal/store"
 )
 
 // Links is the resolver for the links field.

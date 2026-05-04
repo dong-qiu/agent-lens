@@ -8,7 +8,7 @@ import (
 	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/dongqiu/agent-lens/internal/store"
+	"github.com/dong-qiu/agent-lens/internal/store"
 )
 
 // RegisterRoutes wires the GraphQL endpoint at /graphql onto r. Mount r

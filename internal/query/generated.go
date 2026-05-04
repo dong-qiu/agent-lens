@@ -912,7 +912,7 @@ func (ec *executionContext) _Actor_type(ctx context.Context, field graphql.Colle
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v ActorType) graphql.Marshaler {
-			return ec.marshalNActorType2githubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐActorType(ctx, selections, v)
+			return ec.marshalNActorType2githubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐActorType(ctx, selections, v)
 		},
 		true,
 		true,
@@ -1073,7 +1073,7 @@ func (ec *executionContext) _Event_actor(ctx context.Context, field graphql.Coll
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v *Actor) graphql.Marshaler {
-			return ec.marshalNActor2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐActor(ctx, selections, v)
+			return ec.marshalNActor2ᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐActor(ctx, selections, v)
 		},
 		true,
 		true,
@@ -1105,7 +1105,7 @@ func (ec *executionContext) _Event_kind(ctx context.Context, field graphql.Colle
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v EventKind) graphql.Marshaler {
-			return ec.marshalNEventKind2githubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐEventKind(ctx, selections, v)
+			return ec.marshalNEventKind2githubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐEventKind(ctx, selections, v)
 		},
 		true,
 		true,
@@ -1243,7 +1243,7 @@ func (ec *executionContext) _Event_links(ctx context.Context, field graphql.Coll
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v []*Link) graphql.Marshaler {
-			return ec.marshalNLink2ᚕᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐLinkᚄ(ctx, selections, v)
+			return ec.marshalNLink2ᚕᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐLinkᚄ(ctx, selections, v)
 		},
 		true,
 		true,
@@ -1275,7 +1275,7 @@ func (ec *executionContext) _Event_usage(ctx context.Context, field graphql.Coll
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v *TokenUsage) graphql.Marshaler {
-			return ec.marshalOTokenUsage2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐTokenUsage(ctx, selections, v)
+			return ec.marshalOTokenUsage2ᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐTokenUsage(ctx, selections, v)
 		},
 		true,
 		false,
@@ -1446,7 +1446,7 @@ func (ec *executionContext) _Query_event(ctx context.Context, field graphql.Coll
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v *Event) graphql.Marshaler {
-			return ec.marshalOEvent2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐEvent(ctx, selections, v)
+			return ec.marshalOEvent2ᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐEvent(ctx, selections, v)
 		},
 		true,
 		false,
@@ -1490,7 +1490,7 @@ func (ec *executionContext) _Query_events(ctx context.Context, field graphql.Col
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v []*Event) graphql.Marshaler {
-			return ec.marshalNEvent2ᚕᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐEventᚄ(ctx, selections, v)
+			return ec.marshalNEvent2ᚕᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐEventᚄ(ctx, selections, v)
 		},
 		true,
 		true,
@@ -1578,7 +1578,7 @@ func (ec *executionContext) _Query_sessions(ctx context.Context, field graphql.C
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v []*Session) graphql.Marshaler {
-			return ec.marshalNSession2ᚕᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐSessionᚄ(ctx, selections, v)
+			return ec.marshalNSession2ᚕᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐSessionᚄ(ctx, selections, v)
 		},
 		true,
 		true,
@@ -1622,7 +1622,7 @@ func (ec *executionContext) _Query_linkedEvents(ctx context.Context, field graph
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v []*Event) graphql.Marshaler {
-			return ec.marshalNEvent2ᚕᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐEventᚄ(ctx, selections, v)
+			return ec.marshalNEvent2ᚕᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐEventᚄ(ctx, selections, v)
 		},
 		true,
 		true,
@@ -1833,7 +1833,7 @@ func (ec *executionContext) _Session_totalUsage(ctx context.Context, field graph
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v *TokenUsage) graphql.Marshaler {
-			return ec.marshalOTokenUsage2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐTokenUsage(ctx, selections, v)
+			return ec.marshalOTokenUsage2ᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐTokenUsage(ctx, selections, v)
 		},
 		true,
 		false,
@@ -4081,7 +4081,7 @@ func (ec *executionContext) ___Type(ctx context.Context, sel ast.SelectionSet, o
 
 // region    ***************************** type.gotpl *****************************
 
-func (ec *executionContext) marshalNActor2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐActor(ctx context.Context, sel ast.SelectionSet, v *Actor) graphql.Marshaler {
+func (ec *executionContext) marshalNActor2ᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐActor(ctx context.Context, sel ast.SelectionSet, v *Actor) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
@@ -4091,13 +4091,13 @@ func (ec *executionContext) marshalNActor2ᚖgithubᚗcomᚋdongqiuᚋagentᚑle
 	return ec._Actor(ctx, sel, v)
 }
 
-func (ec *executionContext) unmarshalNActorType2githubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐActorType(ctx context.Context, v any) (ActorType, error) {
+func (ec *executionContext) unmarshalNActorType2githubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐActorType(ctx context.Context, v any) (ActorType, error) {
 	var res ActorType
 	err := res.UnmarshalGQL(v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
-func (ec *executionContext) marshalNActorType2githubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐActorType(ctx context.Context, sel ast.SelectionSet, v ActorType) graphql.Marshaler {
+func (ec *executionContext) marshalNActorType2githubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐActorType(ctx context.Context, sel ast.SelectionSet, v ActorType) graphql.Marshaler {
 	return v
 }
 
@@ -4117,11 +4117,11 @@ func (ec *executionContext) marshalNBoolean2bool(ctx context.Context, sel ast.Se
 	return res
 }
 
-func (ec *executionContext) marshalNEvent2ᚕᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐEventᚄ(ctx context.Context, sel ast.SelectionSet, v []*Event) graphql.Marshaler {
+func (ec *executionContext) marshalNEvent2ᚕᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐEventᚄ(ctx context.Context, sel ast.SelectionSet, v []*Event) graphql.Marshaler {
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
 		fc.Result = &v[i]
-		return ec.marshalNEvent2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐEvent(ctx, sel, v[i])
+		return ec.marshalNEvent2ᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐEvent(ctx, sel, v[i])
 	})
 
 	for _, e := range ret {
@@ -4133,7 +4133,7 @@ func (ec *executionContext) marshalNEvent2ᚕᚖgithubᚗcomᚋdongqiuᚋagent�
 	return ret
 }
 
-func (ec *executionContext) marshalNEvent2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐEvent(ctx context.Context, sel ast.SelectionSet, v *Event) graphql.Marshaler {
+func (ec *executionContext) marshalNEvent2ᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐEvent(ctx context.Context, sel ast.SelectionSet, v *Event) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
@@ -4143,13 +4143,13 @@ func (ec *executionContext) marshalNEvent2ᚖgithubᚗcomᚋdongqiuᚋagentᚑle
 	return ec._Event(ctx, sel, v)
 }
 
-func (ec *executionContext) unmarshalNEventKind2githubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐEventKind(ctx context.Context, v any) (EventKind, error) {
+func (ec *executionContext) unmarshalNEventKind2githubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐEventKind(ctx context.Context, v any) (EventKind, error) {
 	var res EventKind
 	err := res.UnmarshalGQL(v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
-func (ec *executionContext) marshalNEventKind2githubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐEventKind(ctx context.Context, sel ast.SelectionSet, v EventKind) graphql.Marshaler {
+func (ec *executionContext) marshalNEventKind2githubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐEventKind(ctx context.Context, sel ast.SelectionSet, v EventKind) graphql.Marshaler {
 	return v
 }
 
@@ -4231,11 +4231,11 @@ func (ec *executionContext) marshalNInt2int(ctx context.Context, sel ast.Selecti
 	return res
 }
 
-func (ec *executionContext) marshalNLink2ᚕᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐLinkᚄ(ctx context.Context, sel ast.SelectionSet, v []*Link) graphql.Marshaler {
+func (ec *executionContext) marshalNLink2ᚕᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐLinkᚄ(ctx context.Context, sel ast.SelectionSet, v []*Link) graphql.Marshaler {
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
 		fc.Result = &v[i]
-		return ec.marshalNLink2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐLink(ctx, sel, v[i])
+		return ec.marshalNLink2ᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐLink(ctx, sel, v[i])
 	})
 
 	for _, e := range ret {
@@ -4247,7 +4247,7 @@ func (ec *executionContext) marshalNLink2ᚕᚖgithubᚗcomᚋdongqiuᚋagentᚑ
 	return ret
 }
 
-func (ec *executionContext) marshalNLink2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐLink(ctx context.Context, sel ast.SelectionSet, v *Link) graphql.Marshaler {
+func (ec *executionContext) marshalNLink2ᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐLink(ctx context.Context, sel ast.SelectionSet, v *Link) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
@@ -4257,11 +4257,11 @@ func (ec *executionContext) marshalNLink2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlen
 	return ec._Link(ctx, sel, v)
 }
 
-func (ec *executionContext) marshalNSession2ᚕᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐSessionᚄ(ctx context.Context, sel ast.SelectionSet, v []*Session) graphql.Marshaler {
+func (ec *executionContext) marshalNSession2ᚕᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐSessionᚄ(ctx context.Context, sel ast.SelectionSet, v []*Session) graphql.Marshaler {
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
 		fc.Result = &v[i]
-		return ec.marshalNSession2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐSession(ctx, sel, v[i])
+		return ec.marshalNSession2ᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐSession(ctx, sel, v[i])
 	})
 
 	for _, e := range ret {
@@ -4273,7 +4273,7 @@ func (ec *executionContext) marshalNSession2ᚕᚖgithubᚗcomᚋdongqiuᚋagent
 	return ret
 }
 
-func (ec *executionContext) marshalNSession2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐSession(ctx context.Context, sel ast.SelectionSet, v *Session) graphql.Marshaler {
+func (ec *executionContext) marshalNSession2ᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐSession(ctx context.Context, sel ast.SelectionSet, v *Session) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
@@ -4486,7 +4486,7 @@ func (ec *executionContext) marshalOBoolean2ᚖbool(ctx context.Context, sel ast
 	return res
 }
 
-func (ec *executionContext) marshalOEvent2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐEvent(ctx context.Context, sel ast.SelectionSet, v *Event) graphql.Marshaler {
+func (ec *executionContext) marshalOEvent2ᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐEvent(ctx context.Context, sel ast.SelectionSet, v *Event) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
@@ -4565,7 +4565,7 @@ func (ec *executionContext) marshalOTime2ᚖtimeᚐTime(ctx context.Context, sel
 	return res
 }
 
-func (ec *executionContext) marshalOTokenUsage2ᚖgithubᚗcomᚋdongqiuᚋagentᚑlensᚋinternalᚋqueryᚐTokenUsage(ctx context.Context, sel ast.SelectionSet, v *TokenUsage) graphql.Marshaler {
+func (ec *executionContext) marshalOTokenUsage2ᚖgithubᚗcomᚋdongᚑqiuᚋagentᚑlensᚋinternalᚋqueryᚐTokenUsage(ctx context.Context, sel ast.SelectionSet, v *TokenUsage) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}

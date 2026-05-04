@@ -395,7 +395,7 @@ const file_event_proto_rawDesc = "" +
 	"\x12\x15\n" +
 	"\x11EVENT_KIND_REVIEW\x10\v\x12\x17\n" +
 	"\x13EVENT_KIND_DECISION\x10\f\x12\x13\n" +
-	"\x0fEVENT_KIND_PUSH\x10\rB.Z,github.com/dongqiu/agent-lens/internal/pb;pbb\x06proto3"
+	"\x0fEVENT_KIND_PUSH\x10\rB/Z-github.com/dong-qiu/agent-lens/internal/pb;pbb\x06proto3"
 
 var (
 	file_event_proto_rawDescOnce sync.Once

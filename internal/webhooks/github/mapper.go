@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dongqiu/agent-lens/internal/ingest"
+	"github.com/dong-qiu/agent-lens/internal/ingest"
 )
 
 // pullRequestPayload is the subset of GitHub's `pull_request` webhook

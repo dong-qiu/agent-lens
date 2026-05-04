@@ -13,12 +13,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/dongqiu/agent-lens/internal/attest"
-	"github.com/dongqiu/agent-lens/internal/audit"
-	"github.com/dongqiu/agent-lens/internal/ingest"
-	"github.com/dongqiu/agent-lens/internal/linking"
-	"github.com/dongqiu/agent-lens/internal/query"
-	"github.com/dongqiu/agent-lens/internal/store"
+	"github.com/dong-qiu/agent-lens/internal/attest"
+	"github.com/dong-qiu/agent-lens/internal/audit"
+	"github.com/dong-qiu/agent-lens/internal/ingest"
+	"github.com/dong-qiu/agent-lens/internal/linking"
+	"github.com/dong-qiu/agent-lens/internal/query"
+	"github.com/dong-qiu/agent-lens/internal/store"
 )
 
 // startHookTestServer mirrors internal/audit.startTestServer but lives

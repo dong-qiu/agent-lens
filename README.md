@@ -6,7 +6,7 @@
 
 ## 状态
 
-M1 开发中。后端 + hook + GraphQL 已就绪并有测试覆盖，UI 时间线视图已落第一版。线上 dogfood 计划在 M3 完成后激活（SPEC §17）。
+M1–M3 已交付，§17 dogfood 已激活——本仓库自身就是首个使用者。v0.1.0 personal-mode 发布筹备中（详见 [`docs/ADR/0006-release-and-distribution-v0.1.md`](./docs/ADR/0006-release-and-distribution-v0.1.md)）；当前安装路径仍是 build-from-source（见 §"一次跑通"）。Team mode、Helm chart、Windows、PR Review Bot outbound 等不在 v0.1 范围。
 
 ## 一次跑通
 
@@ -333,10 +333,6 @@ agent-lens-hook verify-audit-report my-trace.json
 - **GitHub webhook 回路**：要把 PR / push / workflow_run 也接进来，需要把本机服务通过隧道（ngrok / cloudflared）暴露到公网，再在 `dong-qiu/agent-lens` 仓库设置里挂 webhook。这一步 SPEC §17 没强制；按需做。
 - **Project 模型**：v0 没有"项目"抽象，session_id 前缀（`claude-code:` / `github-pr:` / `deploy:` ...）已经天然分隔。多项目共用一个 store 时再补 project 维度。
 
-## 模块名
-
-`go.mod` 的 `github.com/dongqiu/agent-lens` 是占位。落定 GitHub 组织后用 `go mod edit -module <new>` 替换。
-
 ## 许可
 
-待定。
+Apache License 2.0。详见 [`LICENSE`](./LICENSE)。

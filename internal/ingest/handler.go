@@ -27,8 +27,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/oklog/ulid/v2"
 
-	"github.com/dongqiu/agent-lens/internal/hashchain"
-	"github.com/dongqiu/agent-lens/internal/store"
+	"github.com/dong-qiu/agent-lens/internal/hashchain"
+	"github.com/dong-qiu/agent-lens/internal/store"
 )
 
 var (
