@@ -4,7 +4,7 @@ package agentlens.v1;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "github.com/dongqiu/agent-lens/internal/pb;pb";
+option go_package = "github.com/dong-qiu/agent-lens/internal/pb;pb";
 
 // Artifact is content-addressed by id (sha256 of blob_ref content).
 message Artifact {

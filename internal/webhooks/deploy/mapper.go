@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dongqiu/agent-lens/internal/ingest"
+	"github.com/dong-qiu/agent-lens/internal/ingest"
 )
 
 // payload is the shape /webhooks/deploy accepts. Most fields are

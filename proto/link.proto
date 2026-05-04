@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package agentlens.v1;
 
-option go_package = "github.com/dongqiu/agent-lens/internal/pb;pb";
+option go_package = "github.com/dong-qiu/agent-lens/internal/pb;pb";
 
 // Link expresses a causal or semantic relation between two events.
 // Stored separately from events so linking can be re-derived without

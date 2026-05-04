@@ -13,10 +13,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/dongqiu/agent-lens/internal/ingest"
-	"github.com/dongqiu/agent-lens/internal/linking"
-	"github.com/dongqiu/agent-lens/internal/query"
-	"github.com/dongqiu/agent-lens/internal/store"
+	"github.com/dong-qiu/agent-lens/internal/ingest"
+	"github.com/dong-qiu/agent-lens/internal/linking"
+	"github.com/dong-qiu/agent-lens/internal/query"
+	"github.com/dong-qiu/agent-lens/internal/store"
 )
 
 // startTestServer wires ingest + query + linking against an in-memory

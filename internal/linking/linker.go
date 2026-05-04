@@ -16,8 +16,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/dongqiu/agent-lens/internal/ingest"
-	"github.com/dongqiu/agent-lens/internal/store"
+	"github.com/dong-qiu/agent-lens/internal/ingest"
+	"github.com/dong-qiu/agent-lens/internal/store"
 )
 
 // DefaultRelation is the fallback when InferRelation has no specific

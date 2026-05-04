@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dongqiu/agent-lens/internal/store"
+	"github.com/dong-qiu/agent-lens/internal/store"
 )
 
 func TestIngestHappyPath(t *testing.T) {

@@ -1,6 +1,6 @@
 package query
 
-import "github.com/dongqiu/agent-lens/internal/store"
+import "github.com/dong-qiu/agent-lens/internal/store"
 
 // Resolver is the root of the GraphQL resolver tree. Dependencies are
 // injected at construction time and accessed by the per-type resolver

@@ -5,7 +5,7 @@ package agentlens.v1;
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/dongqiu/agent-lens/internal/pb;pb";
+option go_package = "github.com/dong-qiu/agent-lens/internal/pb;pb";
 
 // Event is the canonical record for one observable action in the human-agent
 // coding pipeline. Events are append-only and form a hash chain via prev_hash.

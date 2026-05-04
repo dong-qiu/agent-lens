@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/dongqiu/agent-lens/internal/transcript"
+	"github.com/dong-qiu/agent-lens/internal/transcript"
 )
 
 // claudeHookInput captures the fields we read from a Claude Code hook

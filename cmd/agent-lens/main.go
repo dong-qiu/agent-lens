@@ -14,13 +14,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/dongqiu/agent-lens/internal/auth"
-	"github.com/dongqiu/agent-lens/internal/ingest"
-	"github.com/dongqiu/agent-lens/internal/linking"
-	"github.com/dongqiu/agent-lens/internal/query"
-	"github.com/dongqiu/agent-lens/internal/store"
-	deploywh "github.com/dongqiu/agent-lens/internal/webhooks/deploy"
-	githubwh "github.com/dongqiu/agent-lens/internal/webhooks/github"
+	"github.com/dong-qiu/agent-lens/internal/auth"
+	"github.com/dong-qiu/agent-lens/internal/ingest"
+	"github.com/dong-qiu/agent-lens/internal/linking"
+	"github.com/dong-qiu/agent-lens/internal/query"
+	"github.com/dong-qiu/agent-lens/internal/store"
+	deploywh "github.com/dong-qiu/agent-lens/internal/webhooks/deploy"
+	githubwh "github.com/dong-qiu/agent-lens/internal/webhooks/github"
 )
 
 func main() {

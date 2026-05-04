@@ -173,7 +173,7 @@ const file_artifact_proto_rawDesc = "" +
 	"\x13ARTIFACT_TYPE_IMAGE\x10\x04\x12\x1d\n" +
 	"\x19ARTIFACT_TYPE_TEST_REPORT\x10\x05\x12\x1b\n" +
 	"\x17ARTIFACT_TYPE_BUILD_LOG\x10\x06\x12\x1f\n" +
-	"\x1bARTIFACT_TYPE_DEPLOY_RECORD\x10\aB.Z,github.com/dongqiu/agent-lens/internal/pb;pbb\x06proto3"
+	"\x1bARTIFACT_TYPE_DEPLOY_RECORD\x10\aB/Z-github.com/dong-qiu/agent-lens/internal/pb;pbb\x06proto3"
 
 var (
 	file_artifact_proto_rawDescOnce sync.Once

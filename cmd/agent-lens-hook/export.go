@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/dongqiu/agent-lens/internal/attest"
+	"github.com/dong-qiu/agent-lens/internal/attest"
 )
 
 const exportUsage = `agent-lens-hook export — export an in-toto / SLSA attestation
