@@ -18,11 +18,11 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-const migrationsDir = "../../migrations"
+const migrationsDir = "../migrate/sql"
 
-// loadSchema concatenates every migrations/*.up.sql in lexical order so
-// the integration tests run against the same schema a fresh deployment
-// gets after `make migrate-up`.
+// loadSchema concatenates every *.up.sql under internal/migrate/sql in
+// lexical order so the integration tests run against the same schema
+// the server applies on startup via internal/migrate.Up().
 func loadSchema(t *testing.T) string {
 	t.Helper()
 	files, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
