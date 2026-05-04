@@ -28,7 +28,7 @@ These were settled during initial scoping and are referenced throughout `SPEC.md
 
 - Treat `SPEC.md` as the source of truth for design. If a request conflicts with it, surface the conflict and ask before changing the spec.
 - Architecture decisions live in `docs/ADR/` (see `docs/ADR/README.md` for the SPEC vs ADR vs Patch mechanism). Accepted ADRs are append-only — propose a new ADR rather than editing one in place. Non-trivial design choices (new EventKind, schema change, irreversible tech selection) should land as a draft ADR before code.
-- Common commands are wired in the `Makefile`: `make build`, `make proto`, `make gqlgen`, `make test`, `make test-integration`, `make migrate-up`, `make compose-up`, `make web-dev`, `make web-build`. `make help` lists them all.
+- Common commands are wired in the `Makefile`: `make build`, `make build-prod` (with embedded UI), `make proto`, `make gqlgen`, `make test`, `make test-integration`, `make compose-up`, `make web-dev`, `make web-build`, `make embed-webui`. `make help` lists them all. (`make migrate-up` still exists but is legacy — server self-migrates on startup unless `AGENT_LENS_SKIP_MIGRATE=1`.)
 
 ## Self-review before merge
 
@@ -51,8 +51,8 @@ The collector defaults to `AGENT_LENS_STORE=postgres`. To run the dogfood loop w
 #    the data services.)
 docker compose -f deploy/compose/docker-compose.yml up -d postgres minio
 
-# 2. Apply migrations (requires `golang-migrate`; `brew install golang-migrate`).
-make migrate-up
+# 2. (Migrations apply automatically on agent-lens startup; no separate
+#     CLI install needed for the dogfood loop.)
 
 # 3. Run the collector. With no AGENT_LENS_STORE override it talks to
 #    localhost:5432 using the default DSN baked into main.go.

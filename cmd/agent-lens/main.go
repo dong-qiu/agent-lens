@@ -17,8 +17,10 @@ import (
 	"github.com/dong-qiu/agent-lens/internal/auth"
 	"github.com/dong-qiu/agent-lens/internal/ingest"
 	"github.com/dong-qiu/agent-lens/internal/linking"
+	"github.com/dong-qiu/agent-lens/internal/migrate"
 	"github.com/dong-qiu/agent-lens/internal/query"
 	"github.com/dong-qiu/agent-lens/internal/store"
+	"github.com/dong-qiu/agent-lens/internal/webui"
 	deploywh "github.com/dong-qiu/agent-lens/internal/webhooks/deploy"
 	githubwh "github.com/dong-qiu/agent-lens/internal/webhooks/github"
 )
@@ -45,6 +47,20 @@ func main() {
 		st = store.NewMemory()
 		slog.Info("store: memory (ephemeral; events lost on restart)")
 	case "postgres", "":
+		// Apply embedded migrations on startup so personal-mode users
+		// don't need a separate `golang-migrate` install (issue #12).
+		// AGENT_LENS_SKIP_MIGRATE=1 lets ops with externally-managed
+		// schemas opt out (e.g. Helm + Atlas / sqitch).
+		if os.Getenv("AGENT_LENS_SKIP_MIGRATE") == "" {
+			if err := migrate.Up(pgDSN); err != nil {
+				slog.Error("migrate up", "err", err)
+				os.Exit(1)
+			}
+			slog.Info("migrations applied")
+		} else {
+			slog.Info("AGENT_LENS_SKIP_MIGRATE set; skipping embedded migrations")
+		}
+
 		pg, err := store.OpenPostgres(ctx, pgDSN)
 		if err != nil {
 			slog.Error("open store", "err", err)
@@ -124,6 +140,18 @@ func main() {
 		})
 		slog.Info("AGENT_LENS_DEPLOY_WEBHOOK_TOKEN unset; /webhooks/deploy returns 503")
 	}
+
+	// Static UI handler at /. Registered last so /healthz, /v1/*,
+	// /webhooks/* take precedence (chi matches in registration order
+	// only for explicit routes; the catch-all serves what's left).
+	// When the embedded UI is missing (no `make embed-webui` run),
+	// the handler returns a helpful 503 stub at /.
+	if webui.Available() {
+		slog.Info("ui: embedded bundle available; serving at /")
+	} else {
+		slog.Info("ui: not embedded; / returns dev-mode stub. Run `make embed-webui` for prod.")
+	}
+	r.Mount("/", webui.Handler())
 
 	srv := &http.Server{
 		Addr:              addr,

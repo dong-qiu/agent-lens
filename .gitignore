@@ -17,6 +17,11 @@ web/vite.config.js
 web/vite.config.d.ts
 *.tsbuildinfo
 
+# Embedded UI bundle (populated by `make embed-webui` from web/dist; only
+# .gitkeep is checked in so `go build` works before the first UI build).
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep
+
 # Env / local config
 .env
 .env.local

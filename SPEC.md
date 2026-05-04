@@ -326,7 +326,7 @@ agent-lens/
 ├── deploy/
 │   ├── compose/            # M1 docker-compose.yml
 │   └── helm/               # M3+ K8s Helm chart
-├── migrations/             # SQL（golang-migrate）
+├── internal/migrate/sql/   # SQL migrations（embedded；server 启动时自迁移）
 ├── docs/
 │   ├── STACK.md            # 详细选型记录与备选
 │   └── ADR/                # Architecture Decision Records

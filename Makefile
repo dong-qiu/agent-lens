@@ -1,4 +1,4 @@
-.PHONY: help build proto lint test migrate-up migrate-down compose-up compose-down db-backup db-restore db-verify-backup clean
+.PHONY: help build build-prod embed-webui proto lint test migrate-up migrate-down compose-up compose-down db-backup db-restore db-verify-backup clean
 
 BIN_DIR := bin
 PG_DSN ?= postgres://agentlens:agentlens@localhost:5432/agentlens?sslmode=disable
@@ -6,10 +6,18 @@ PG_DSN ?= postgres://agentlens:agentlens@localhost:5432/agentlens?sslmode=disabl
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?##"}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-build: ## Build server + hook binaries
+build: ## Build server + hook binaries (no UI embed; `go run` works for dev)
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/agent-lens      ./cmd/agent-lens
 	go build -o $(BIN_DIR)/agent-lens-hook ./cmd/agent-lens-hook
+
+embed-webui: web-build ## Stage built UI into internal/webui/dist for embedding
+	@rm -rf internal/webui/dist
+	@mkdir -p internal/webui/dist
+	@cp -r web/dist/. internal/webui/dist/
+	@touch internal/webui/dist/.gitkeep
+
+build-prod: embed-webui build ## Build with embedded UI (production / release)
 
 proto: ## Generate Go code from proto/
 	buf generate
@@ -30,11 +38,11 @@ test-integration: ## Run Postgres integration tests (requires Docker)
 	fi; \
 	TESTCONTAINERS_RYUK_DISABLED=true go test -tags integration ./...
 
-migrate-up: ## Apply DB migrations
-	migrate -path migrations -database "$(PG_DSN)" up
+migrate-up: ## (legacy) Apply DB migrations via external CLI. v0.1+ servers self-migrate on startup; this target is kept only for ops with AGENT_LENS_SKIP_MIGRATE=1.
+	migrate -path internal/migrate/sql -database "$(PG_DSN)" up
 
-migrate-down: ## Roll back last migration
-	migrate -path migrations -database "$(PG_DSN)" down 1
+migrate-down: ## (legacy) Roll back last migration via external CLI.
+	migrate -path internal/migrate/sql -database "$(PG_DSN)" down 1
 
 db-backup: ## Dump events / links / artifacts to ./backups/agentlens-<ts>.dump
 	PG_DSN="$(PG_DSN)" scripts/pg-backup.sh
@@ -64,3 +72,4 @@ web-build: ## Production build of the web bundle
 
 clean: ## Remove build outputs
 	rm -rf $(BIN_DIR) internal/pb/*.pb.go web/dist
+	@find internal/webui/dist -mindepth 1 ! -name .gitkeep -delete 2>/dev/null || true
