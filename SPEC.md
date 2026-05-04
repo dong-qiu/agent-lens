@@ -202,7 +202,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
   - **build**：predicate = `slsa.dev/provenance/v1`（标准 SLSA build provenance）。
   - **deploy**：predicate = `agent-lens.dev/deploy-evidence/v1`（关联上游 trace 根 ID）。
 - 签名使用 Sigstore（cosign / Fulcio / Rekor）或本地 KMS；自托管模式两者皆可。
-- 对外定位：**把 SLSA / in-toto 的可信链路向 AI 协作上游延伸**，envelope 与签名按标准 DSSE + in-toto v1，**官方校验路径用 `agent-lens-hook verify-attestation`**。cosign 的 `verify-blob-attestation` 在 commit / deploy attestation 上不直接通（subject 用 `gitCommit` / image digest，cosign 期望 sha256 over blob）；cosign `verify-blob` 走手动 PAE 路径可校验签名（README 有 recipe）。Kyverno / Conftest 等基于 OPA 的策略工具消费 in-toto Statement 内部，不依赖 cosign 那条 verify 路径，独立可用。SLSA build 路径理论可走 cosign（subject 是 sha256 artifact digest）但 v0.1 未端到端验证，列 v0.2 路线。
+- 对外定位：**把 SLSA / in-toto 的可信链路向 AI 协作上游延伸**，envelope 与签名按标准 DSSE + in-toto v1，**官方校验路径用 `agent-lens-hook verify-attestation`**。cosign 的 `verify-blob-attestation` 在 commit / deploy attestation 上不直接通（subject 用 `gitCommit` / image digest，cosign 期望 sha256 over blob）；cosign `verify-blob` 走手动 PAE 路径可校验签名（README 有 recipe，已实测）。SLSA build 路径理论可走 cosign（subject 是 sha256 artifact digest）但 v0.1 未端到端验证，列 v0.2 路线。其它下游工具（Kyverno / Conftest 等）的集成 v0.1 范围外，留待具体 use case 出现时单独验证。
 
 ## 12. 安全与合规
 
