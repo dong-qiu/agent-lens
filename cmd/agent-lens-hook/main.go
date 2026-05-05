@@ -16,6 +16,7 @@ Subcommands:
   verify                 Verify the local hash chain of a session.
   keygen                 Generate an ed25519 key pair for DSSE attestations.
   export                 Export an in-toto / SLSA attestation, or an audit report.
+  sign-release           Sign a release binary and emit a DSSE attestation.
   verify-attestation     Verify a DSSE-wrapped in-toto attestation file.
   verify-audit-report    Verify an audit-report bundle.
 
@@ -40,6 +41,8 @@ func main() {
 		runKeygen(os.Args[2:])
 	case "export":
 		runExport(os.Args[2:])
+	case "sign-release":
+		runSignRelease(os.Args[2:])
 	case "verify-attestation":
 		runVerifyAttestation(os.Args[2:])
 	case "verify-audit-report":
@@ -57,5 +60,6 @@ func main() {
 // runVerify is implemented in verify.go.
 // runKeygen is implemented in keygen.go.
 // runExport is implemented in export.go.
+// runSignRelease is implemented in sign_release.go.
 // runVerifyAttestation is implemented in verify_attestation.go.
 // runVerifyAuditReport is implemented in audit_report.go.
