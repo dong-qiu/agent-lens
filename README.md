@@ -215,9 +215,10 @@ v0.1 与 cosign 的关系是**部分兼容**：
 | 路径 | 状态 | 备注 |
 |---|---|---|
 | `agent-lens-hook verify-attestation` | ✅ 推荐 | 验签 + predicateType 校验 + subject 显示 一气呵成 |
+| `cosign verify-blob-attestation` (release-artifact) | ✅ 直接可用 | release.yml 用 `agent-lens-hook sign-release` 给每个 binary 签的 attestation：subject digest 是 binary 的 sha256，cosign 走 native 路径就能验 |
 | `cosign verify-blob-attestation` (code-provenance / deploy-evidence) | ❌ | subject digest 用 `gitCommit` 或 image，cosign 假设 sha256 over blob，subject linkage 失败 |
 | `cosign verify-blob-attestation` (slsa-build) | ⏳ 未测 | SLSA Build subject 用 sha256 artifact digests，理论上 cosign 应能跑；v0.1 没在 CI 验证，留给 v0.2 |
-| `cosign verify-blob` 抽 raw 签名 + DSSE PAE blob | ✅ workaround | 见下方 recipe；`Verified OK` 已实测过 |
+| `cosign verify-blob` 抽 raw 签名 + DSSE PAE blob | ✅ workaround | 见下方 recipe；任何 envelope 都能验签，但不做 subject linkage |
 
 **手动 cosign 校验 recipe**（如果你 audit pipeline 已经在用 cosign）：
 

@@ -1,0 +1,204 @@
+# release.yml — v0.1 release pipeline (ADR 0006 D4 / D6 / D7).
+#
+# Triggers on a `v*.*.*` tag push. Produces:
+#   - 8 cross-built binaries (agent-lens + agent-lens-hook × darwin|linux × amd64|arm64)
+#   - 8 DSSE in-toto attestations (.sig) signed with the project's ed25519 key
+#   - checksums.txt (sha256 over the binaries)
+#   - agent-lens-public.pem (the verification key, derived from the private key
+#     via `openssl pkey -pubout` so we don't need a second secret)
+#   - container image at ghcr.io/dong-qiu/agent-lens:vX.Y.Z + :latest (multi-arch)
+#
+# Required repo secret:
+#   AGENT_LENS_RELEASE_PRIVATE_KEY — PEM-encoded ed25519 private key (PKCS#8),
+#   produced by `agent-lens-hook keygen` and pasted into Settings → Secrets.
+#   The matching public key is derived in-workflow and shipped as a release asset.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+jobs:
+  build-binaries:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: linux,  goarch: amd64 }
+          - { goos: linux,  goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Cross-build agent-lens + agent-lens-hook
+        env:
+          CGO_ENABLED: '0'
+          GOOS:    ${{ matrix.goos }}
+          GOARCH:  ${{ matrix.goarch }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          # -trimpath strips local filesystem paths from the binary so two
+          # builds from different machines/CI runners produce byte-equal output
+          # (modulo BuiltAt timestamp which lives in the *.sig predicate).
+          go build -trimpath -ldflags="-s -w" \
+            -o dist/agent-lens-${{ matrix.goos }}-${{ matrix.goarch }} \
+            ./cmd/agent-lens
+          go build -trimpath -ldflags="-s -w" \
+            -o dist/agent-lens-hook-${{ matrix.goos }}-${{ matrix.goarch }} \
+            ./cmd/agent-lens-hook
+
+      - name: Build native sign-release helper for THIS runner
+        # The cross-built binaries above can't run on the linux/amd64 runner
+        # (when matrix is darwin/arm64 etc.). We need a native build of
+        # agent-lens-hook to do the signing locally.
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -o /tmp/hook-runner ./cmd/agent-lens-hook
+
+      - name: Stage release private key from secret
+        env:
+          KEY: ${{ secrets.AGENT_LENS_RELEASE_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::AGENT_LENS_RELEASE_PRIVATE_KEY secret is missing." \
+                 "Generate one with 'agent-lens-hook keygen' and add to" \
+                 "Settings → Secrets → Actions."
+            exit 1
+          fi
+          mkdir -p /tmp/keys
+          printf '%s\n' "$KEY" > /tmp/keys/ed25519
+          chmod 600 /tmp/keys/ed25519
+
+      - name: Sign each binary
+        run: |
+          set -e
+          for bin in \
+              dist/agent-lens-${{ matrix.goos }}-${{ matrix.goarch }} \
+              dist/agent-lens-hook-${{ matrix.goos }}-${{ matrix.goarch }}; do
+            /tmp/hook-runner sign-release \
+              --key /tmp/keys/ed25519 \
+              --in "$bin" \
+              --out "${bin}.sig"
+          done
+          ls -la dist/
+
+      - name: Upload binaries + signatures
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+          retention-days: 7
+
+  build-image:
+    name: container image (linux/amd64 + linux/arm64)
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/compose/Dockerfile.server
+          # Multi-arch via QEMU. Linux only — darwin/windows aren't a v0.1
+          # container target (per ADR 0006 D5 the BINARIES are darwin/linux,
+          # but the CONTAINER ships only linux because nobody runs Docker
+          # natively on macOS arm64 without colima/Docker Desktop).
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/dong-qiu/agent-lens:${{ github.ref_name }}
+            ghcr.io/dong-qiu/agent-lens:latest
+          # Enable provenance + SBOM via buildkit defaults; cosign of the
+          # image itself is a v0.2 follow-up (cosign sign vs DSSE-attest of
+          # the manifest is a different signing path than the release-artifact
+          # attestations we sign here).
+
+  release:
+    name: gh release
+    needs: [build-binaries, build-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          # `binaries-darwin-amd64` etc. are separate dirs by default;
+          # merge-multiple flattens them into one dir so we can checksum
+          # and upload uniformly.
+          merge-multiple: true
+
+      - name: Compute checksums.txt over the unsigned binaries
+        run: |
+          cd artifacts
+          # Hash only the binaries themselves; .sig files have their own
+          # internal sha256 in the in-toto subject — checksums.txt is
+          # a quick out-of-band integrity check for users who don't want
+          # to verify the DSSE envelope.
+          sha256sum agent-lens-* agent-lens-hook-* \
+            | grep -v '\.sig$' \
+            | sort \
+            > checksums.txt
+          echo "=== checksums.txt ==="
+          cat checksums.txt
+
+      - name: Derive agent-lens-public.pem from the private secret
+        env:
+          KEY: ${{ secrets.AGENT_LENS_RELEASE_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::AGENT_LENS_RELEASE_PRIVATE_KEY secret missing"
+            exit 1
+          fi
+          # Stage privkey in a tmpfile (mode 600, deleted at job end), then
+          # extract the public part with openssl. ed25519 PEM is plain
+          # PKCS#8 / SPKI which openssl handles natively.
+          umask 077
+          PRIV=$(mktemp)
+          printf '%s\n' "$KEY" > "$PRIV"
+          openssl pkey -in "$PRIV" -pubout -out artifacts/agent-lens-public.pem
+          rm -f "$PRIV"
+          echo "=== agent-lens-public.pem ==="
+          cat artifacts/agent-lens-public.pem
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/agent-lens-*
+            artifacts/checksums.txt
+            artifacts/agent-lens-public.pem
