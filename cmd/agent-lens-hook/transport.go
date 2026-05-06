@@ -96,7 +96,7 @@ func (t *transport) warnFallback(sessionID string, batchSize int, reason string)
 		}
 		path := filepath.Join(homeDir(), ".agent-lens", "sessions", sid+".ndjson")
 		fmt.Fprintf(os.Stderr,
-			"agent-lens-hook: ingest at %s unavailable (%s); falling back to %s (this batch: %d events). Run `agent-lens-hook replay` after the server is back up to flush the backlog.\n",
+			"agent-lens-hook: ingest at %s unavailable (%s); falling back to %s (this batch: %d events). Run `agent-lens-hook replay --remove-on-success` after the server is back up to flush the backlog (the flag prevents duplicates if you re-run; see issue #81).\n",
 			t.url, reason, path, batchSize,
 		)
 	})

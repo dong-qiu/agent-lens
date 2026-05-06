@@ -84,7 +84,10 @@ func TestFallbackWarningOncePerProcess(t *testing.T) {
 		srv.URL,
 		"falling back to",
 		"this batch: 1 events",
-		"agent-lens-hook replay",
+		// The recommendation MUST include --remove-on-success because
+		// v0.1 ingest doesn't dedup on client ULID (issue #81). A
+		// bare `replay` invocation re-creates events on re-run.
+		"agent-lens-hook replay --remove-on-success",
 	} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr missing %q\nstderr was:\n%s", want, stderr)
