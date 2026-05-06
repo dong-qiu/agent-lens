@@ -85,7 +85,7 @@ func runReplay(args []string) {
 func replayCore(dir, url, token string, since time.Time, dryRun, removeOnSuccess bool, client *http.Client, stdout, stderr io.Writer) int {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		fmt.Fprintf(stderr, "agent-lens-hook replay: read dir %s: %v\n", dir, err)
+		_, _ = fmt.Fprintf(stderr, "agent-lens-hook replay: read dir %s: %v\n", dir, err)
 		return 2
 	}
 
@@ -109,7 +109,7 @@ func replayCore(dir, url, token string, since time.Time, dryRun, removeOnSuccess
 		}
 		info, err := e.Info()
 		if err != nil {
-			fmt.Fprintf(stderr, "failed: %s: stat: %v\n", name, err)
+			_, _ = fmt.Fprintf(stderr, "failed: %s: stat: %v\n", name, err)
 			continue
 		}
 		if !since.IsZero() && info.ModTime().Before(since) {
@@ -130,7 +130,7 @@ func replayCore(dir, url, token string, since time.Time, dryRun, removeOnSuccess
 	var succeeded, failed int
 	for _, f := range files {
 		if dryRun {
-			fmt.Fprintf(stdout, "would replay: %s (%d bytes, mtime %s)\n",
+			_, _ = fmt.Fprintf(stdout, "would replay: %s (%d bytes, mtime %s)\n",
 				f.path, f.size, f.mtime.UTC().Format(time.RFC3339))
 			succeeded++
 			continue
@@ -138,29 +138,29 @@ func replayCore(dir, url, token string, since time.Time, dryRun, removeOnSuccess
 
 		body, err := os.ReadFile(f.path)
 		if err != nil {
-			fmt.Fprintf(stderr, "failed: %s: read: %v\n", f.path, err)
+			_, _ = fmt.Fprintf(stderr, "failed: %s: read: %v\n", f.path, err)
 			failed++
 			continue
 		}
 
 		if err := postNDJSON(client, url, token, body); err != nil {
-			fmt.Fprintf(stderr, "failed: %s: %v\n", f.path, err)
+			_, _ = fmt.Fprintf(stderr, "failed: %s: %v\n", f.path, err)
 			failed++
 			continue
 		}
-		fmt.Fprintf(stdout, "replayed: %s (%d bytes)\n", f.path, len(body))
+		_, _ = fmt.Fprintf(stdout, "replayed: %s (%d bytes)\n", f.path, len(body))
 		succeeded++
 
 		if removeOnSuccess {
 			if err := os.Remove(f.path); err != nil {
-				fmt.Fprintf(stderr, "WARN: removed: failed to remove %s: %v\n", f.path, err)
+				_, _ = fmt.Fprintf(stderr, "WARN: removed: failed to remove %s: %v\n", f.path, err)
 			} else {
-				fmt.Fprintf(stdout, "removed: %s\n", f.path)
+				_, _ = fmt.Fprintf(stdout, "removed: %s\n", f.path)
 			}
 		}
 	}
 
-	fmt.Fprintf(stdout, "replay summary: %d files (%d succeeded, %d failed, %d skipped via --since)\n",
+	_, _ = fmt.Fprintf(stdout, "replay summary: %d files (%d succeeded, %d failed, %d skipped via --since)\n",
 		len(files), succeeded, failed, skipped)
 
 	if failed > 0 {
