@@ -27,6 +27,7 @@ Flags:
   --since <RFC3339>     only replay files with mtime >= this timestamp
   --dry-run             list files that would be replayed and exit
   --remove-on-success   delete each file after a successful POST
+                        (strongly recommended; see "Important" below)
 
 Files are processed in mtime-ascending order so older sessions land
 before newer ones. A failure on one file is logged to stderr and the
@@ -38,6 +39,17 @@ Exit codes: 0 on success (or --dry-run with at least one match),
 Example:
   agent-lens-hook replay --dry-run
   agent-lens-hook replay --remove-on-success --url http://localhost:8787
+
+Important — re-running creates duplicates in v0.1:
+
+  v0.1 ingest does not dedup on event ULID; the server overrides the
+  client-supplied id with a fresh server-side ULID on every POST. So
+  re-running replay over a file that was already accepted will insert
+  duplicate events into the database (visible as doubled event counts
+  in Lens UI / GraphQL).
+
+  Always use --remove-on-success unless you have an independent
+  idempotency control. Tracking issue: #81.
 `
 
 func runReplay(args []string) {
