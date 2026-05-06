@@ -14,6 +14,7 @@ Subcommands:
   claude                 Capture a Claude Code hook payload from stdin and forward.
   git-post-commit        Capture a git post-commit event and forward.
   verify                 Verify the local hash chain of a session.
+  replay                 Re-POST fallback NDJSON files to the ingest server.
   keygen                 Generate an ed25519 key pair for DSSE attestations.
   export                 Export an in-toto / SLSA attestation, or an audit report.
   sign-release           Sign a release binary and emit a DSSE attestation.
@@ -37,6 +38,8 @@ func main() {
 		runGitPostCommit(os.Args[2:])
 	case "verify":
 		runVerify(os.Args[2:])
+	case "replay":
+		runReplay(os.Args[2:])
 	case "keygen":
 		runKeygen(os.Args[2:])
 	case "export":
@@ -58,6 +61,7 @@ func main() {
 // runClaude is implemented in claude.go.
 // runGitPostCommit is implemented in git.go.
 // runVerify is implemented in verify.go.
+// runReplay is implemented in replay.go.
 // runKeygen is implemented in keygen.go.
 // runExport is implemented in export.go.
 // runSignRelease is implemented in sign_release.go.
