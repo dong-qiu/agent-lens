@@ -7,8 +7,17 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
+
+// fallbackWarned ensures we print the "fallback engaged" warning to stderr
+// exactly once per hook process invocation. Each Claude Code hook event
+// runs a fresh agent-lens-hook process, so "once per process" naturally
+// translates to "once per hook event" — visible enough that operators
+// notice when the server is down, quiet enough that we don't spam the
+// hook log with N copies for an N-event batch.
+var fallbackWarned sync.Once
 
 const (
 	defaultIngestURL = "http://localhost:8787"
@@ -36,7 +45,11 @@ func newTransport() *transport {
 // Send POSTs the events as NDJSON. On any failure (network, non-2xx,
 // invalid request), it falls back to appending the same NDJSON to a
 // per-session file under $HOME/.agent-lens/sessions/<sid>.ndjson, so
-// events can be replayed later via `agent-lens replay`.
+// events can be replayed later via `agent-lens-hook replay`.
+//
+// On the first fallback in this process, we print a one-line warning to
+// stderr — closes issue #71's silent-degradation gap. Without it, a
+// stopped server is invisible to the user until they go looking.
 func (t *transport) Send(events []map[string]any, sessionID string) error {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -49,6 +62,7 @@ func (t *transport) Send(events []map[string]any, sessionID string) error {
 
 	req, err := http.NewRequest(http.MethodPost, t.url+"/v1/events", bytes.NewReader(body))
 	if err != nil {
+		t.warnFallback(sessionID, len(events), fmt.Sprintf("request build: %v", err))
 		return appendToSink(sessionID, body)
 	}
 	req.Header.Set("Content-Type", "application/x-ndjson")
@@ -58,13 +72,34 @@ func (t *transport) Send(events []map[string]any, sessionID string) error {
 
 	resp, err := t.client.Do(req)
 	if err != nil {
+		t.warnFallback(sessionID, len(events), fmt.Sprintf("transport: %v", err))
 		return appendToSink(sessionID, body)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
+		t.warnFallback(sessionID, len(events), fmt.Sprintf("HTTP %d", resp.StatusCode))
 		return appendToSink(sessionID, body)
 	}
 	return nil
+}
+
+// warnFallback prints a single line to stderr the first time the fallback
+// engages in this process. Format intentionally compact (one line) so it
+// shows cleanly in Claude Code's hook log surface. The "run replay"
+// suggestion gives users an actionable next step rather than just a
+// warning that decays into noise.
+func (t *transport) warnFallback(sessionID string, batchSize int, reason string) {
+	fallbackWarned.Do(func() {
+		sid := sessionID
+		if sid == "" {
+			sid = "unknown"
+		}
+		path := filepath.Join(homeDir(), ".agent-lens", "sessions", sid+".ndjson")
+		fmt.Fprintf(os.Stderr,
+			"agent-lens-hook: ingest at %s unavailable (%s); falling back to %s (this batch: %d events). Run `agent-lens-hook replay` after the server is back up to flush the backlog.\n",
+			t.url, reason, path, batchSize,
+		)
+	})
 }
 
 func appendToSink(sessionID string, body []byte) error {
