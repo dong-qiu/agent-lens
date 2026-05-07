@@ -8,8 +8,19 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/dong-qiu/agent-lens/internal/redact"
 	"github.com/dong-qiu/agent-lens/internal/transcript"
 )
+
+// redactText runs the v0.1 rule-based redactor over free-text content
+// (prompts / thinking / assistant decisions) before it lands in the
+// event payload. Tool-call payloads are NOT redacted because the
+// canonical command (e.g. "curl -H 'Authorization: ...'") is part of
+// what audit needs to see verbatim — redacting commands would break
+// reproducibility checks and replay scenarios.
+func redactText(s string) (string, int) {
+	return redact.Redact(s)
+}
 
 // claudeHookInput captures the fields we read from a Claude Code hook
 // payload on stdin. Other fields are ignored; the original payload is not
@@ -84,10 +95,15 @@ func buildEvents(in *claudeHookInput) (events []map[string]any, commit func() er
 }
 
 func makePrompt(in *claudeHookInput) map[string]any {
-	return baseEvent(in, map[string]any{"type": "human", "id": "user"}, "prompt", map[string]any{
-		"text": in.Prompt,
+	text, n := redactText(in.Prompt)
+	payload := map[string]any{
+		"text": text,
 		"cwd":  in.CWD,
-	})
+	}
+	if n > 0 {
+		payload["redacted_count"] = n
+	}
+	return baseEvent(in, map[string]any{"type": "human", "id": "user"}, "prompt", payload)
 }
 
 func makeToolCall(in *claudeHookInput) map[string]any {
@@ -190,18 +206,26 @@ func makeStopEvents(in *claudeHookInput) ([]map[string]any, func() error) {
 	for _, b := range blocks {
 		switch b.Kind {
 		case "thinking":
+			text, n := redactText(b.Content)
 			payload := map[string]any{
-				"text":       b.Content, // TODO: redact per SPEC §12 before forwarding
+				"text":       text,
 				"message_id": b.MessageID,
 				"source":     "transcript",
+			}
+			if n > 0 {
+				payload["redacted_count"] = n
 			}
 			attachUsageMetadata(payload, &b)
 			events = append(events, baseEvent(in, agentActorWithModel(b.Model), "thought", payload))
 		case "text":
+			text, n := redactText(b.Content)
 			payload := map[string]any{
 				"marker":     "assistant_message",
-				"text":       b.Content,
+				"text":       text,
 				"message_id": b.MessageID,
+			}
+			if n > 0 {
+				payload["redacted_count"] = n
 			}
 			// Surface Claude-Code-side redaction of `thinking` content
 			// so audit readers don't mistake "transcript field empty"
