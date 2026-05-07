@@ -208,6 +208,9 @@ func mergeAgentLensHooks(settingsPath, binPath string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateHooksShape(settings); err != nil {
+		return fmt.Errorf("%s: %w (please fix manually before re-running setup)", settingsPath, err)
+	}
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
 		hooks = map[string]any{}
@@ -249,6 +252,9 @@ func unmergeAgentLensHooks(settingsPath string) error {
 			return nil
 		}
 		return err
+	}
+	if err := validateHooksShape(settings); err != nil {
+		return fmt.Errorf("%s: %w (please fix manually before re-running setup --uninstall)", settingsPath, err)
 	}
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
@@ -324,6 +330,40 @@ func commandIsAgentLensHook(cmd string) bool {
 		return false
 	}
 	return filepath.Base(fields[0]) == "agent-lens-hook"
+}
+
+// validateHooksShape rejects settings whose 'hooks' tree isn't the
+// shape Claude Code's settings.json schema requires. Without this
+// check, a hand-edited settings.json with `"hooks": "string"` would
+// be silently overwritten — the exact silent-degradation pattern this
+// project's signature value statement is built to prevent. Caller
+// surfaces the location to the user with a "fix manually" hint.
+//
+// We validate the outer shape (object → array → object) but NOT the
+// per-hook fields (type / command / timeout); those are Claude Code's
+// schema, not ours, and our merge only inspects `command` via
+// commandIsAgentLensHook which itself fails closed on missing fields.
+func validateHooksShape(settings map[string]any) error {
+	raw, present := settings["hooks"]
+	if !present {
+		return nil
+	}
+	hooks, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("'hooks' is %T, want a JSON object", raw)
+	}
+	for event, eventValue := range hooks {
+		matchers, ok := eventValue.([]any)
+		if !ok {
+			return fmt.Errorf("'hooks.%s' is %T, want a JSON array", event, eventValue)
+		}
+		for i, matcherValue := range matchers {
+			if _, ok := matcherValue.(map[string]any); !ok {
+				return fmt.Errorf("'hooks.%s[%d]' is %T, want a JSON object", event, i, matcherValue)
+			}
+		}
+	}
+	return nil
 }
 
 // readSettings reads + parses the JSON settings file. A missing file

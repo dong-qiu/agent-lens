@@ -209,6 +209,67 @@ func TestUnmergeKeepsOthers(t *testing.T) {
 	}
 }
 
+// TestMergeRefusesMalformedHooks: when the user has hand-edited
+// settings.json into a shape that doesn't match Claude Code's schema
+// (e.g. "hooks" set to a string), merge MUST refuse rather than
+// silently overwrite. Silent overwrite would discard whatever the user
+// was trying to express — exactly the silent-degradation pattern this
+// project is built to surface.
+func TestMergeRefusesMalformedHooks(t *testing.T) {
+	cases := []struct {
+		name string
+		in   map[string]any
+		want string
+	}{
+		{
+			name: "hooks-is-string",
+			in:   map[string]any{"hooks": "this-should-be-an-object"},
+			want: "'hooks' is string, want a JSON object",
+		},
+		{
+			name: "event-is-string",
+			in:   map[string]any{"hooks": map[string]any{"PreToolUse": "not-an-array"}},
+			want: "'hooks.PreToolUse' is string, want a JSON array",
+		},
+		{
+			name: "matcher-is-number",
+			in: map[string]any{"hooks": map[string]any{
+				"PreToolUse": []any{42},
+			}},
+			want: "'hooks.PreToolUse[0]' is float64, want a JSON object",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "settings.json")
+			writeJSON(t, path, tc.in)
+			origBytes, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = mergeAgentLensHooks(path, "/usr/local/bin/agent-lens-hook")
+			if err == nil {
+				t.Fatalf("expected error, got nil; file mutated to:\n%s", readBytes(t, path))
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q missing %q", err.Error(), tc.want)
+			}
+
+			// File must NOT have been modified — error means refuse,
+			// not "ate the data and complained on the way out".
+			postBytes, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(origBytes) != string(postBytes) {
+				t.Errorf("file mutated despite error:\nbefore:\n%s\nafter:\n%s", origBytes, postBytes)
+			}
+		})
+	}
+}
+
 func TestCommandIsAgentLensHook(t *testing.T) {
 	cases := []struct {
 		cmd  string
@@ -257,6 +318,17 @@ func writeJSON(t *testing.T, path string, m map[string]any) {
 
 func debugJSON(v any) string {
 	b, _ := json.MarshalIndent(v, "", "  ")
+	return string(b)
+}
+
+// readBytes is a fatal-on-error file reader used in error-path tests
+// where we need to display the file's post-error state in a t.Errorf.
+func readBytes(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
 	return string(b)
 }
 
