@@ -15,6 +15,7 @@ Subcommands:
   git-post-commit        Capture a git post-commit event and forward.
   verify                 Verify the local hash chain of a session.
   replay                 Re-POST fallback NDJSON files to the ingest server.
+  setup                  Wire hooks into Claude Code (and start docker compose).
   keygen                 Generate an ed25519 key pair for DSSE attestations.
   export                 Export an in-toto / SLSA attestation, or an audit report.
   sign-release           Sign a release binary and emit a DSSE attestation.
@@ -40,6 +41,8 @@ func main() {
 		runVerify(os.Args[2:])
 	case "replay":
 		runReplay(os.Args[2:])
+	case "setup":
+		runSetup(os.Args[2:])
 	case "keygen":
 		runKeygen(os.Args[2:])
 	case "export":
@@ -62,6 +65,7 @@ func main() {
 // runGitPostCommit is implemented in git.go.
 // runVerify is implemented in verify.go.
 // runReplay is implemented in replay.go.
+// runSetup is implemented in setup.go.
 // runKeygen is implemented in keygen.go.
 // runExport is implemented in export.go.
 // runSignRelease is implemented in sign_release.go.
