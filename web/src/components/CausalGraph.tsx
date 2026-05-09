@@ -416,13 +416,14 @@ export function CausalGraph({
     EventsResponse | LinkedEventsResponse
   >({
     queryKey: linked ? ["linkedEvents", sessionId] : ["events", sessionId],
-    // Single-session graph: same 5000 limit as Timeline. Cross-session
-    // (linked) mode keeps perSessionLimit at 1000 because depth=1 with
-    // many linked sessions can multiply: 5000 × N linked sessions
-    // would explode dagre's O(V+E) layout pass. 1000 covers all
-    // reasonable parent / sibling sessions while bounding the graph
-    // size; if a real-world audit hits the cap we'll surface it as
-    // a v0.1.x issue with proper pagination.
+    // Graph view is bounded at 1000 events for both single-session
+    // and cross-session modes. 5000 was empirically too much: dagre's
+    // O(V+E) layout pass blocks the main thread long enough that the
+    // page appears frozen on the dogfood session (~4200 events). The
+    // graph is also visually unreadable past ~1000 nodes — Timeline
+    // is the full-record view (limit 5000), Graph is the high-level
+    // summary. v0.1.x: real pagination + a "show all" affordance
+    // when summary needs deeper drill-down.
     queryFn: linked
       ? () =>
           gql<LinkedEventsResponse>(linkedEventsQuery, {
@@ -430,7 +431,7 @@ export function CausalGraph({
             depth: 1,
             perSessionLimit: 1000,
           })
-      : () => gql<EventsResponse>(eventsQuery, { sessionId, limit: 5000 }),
+      : () => gql<EventsResponse>(eventsQuery, { sessionId, limit: 1000 }),
     enabled: sessionId.length > 0,
     // Audit / graph view doesn't need 2s polling like Timeline — every
     // refetch reruns the dagre layout (O(N) on 200-300 nodes) which
