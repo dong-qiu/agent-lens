@@ -16,7 +16,7 @@ Agent Lens 是面向 Coding Agent 的**可观测、可追溯、可审计**系统
 - **G1 全程捕获**：覆盖 Prompt → Agent Thinking → Tool Calls → Code Change → Test → Build → Deploy 的每一类事件。
 - **G2 因果串联**：把跨阶段、跨工具、跨 Agent 的事件按因果与时序拼成可查询的 trace。
 - **G3 防篡改**：事件 append-only，哈希链 + 可选签名，可校验、可重放。
-- **G4 可审计**：支持按时间、人、Agent、需求 ID、commit、PR、build、deploy 任意维度回溯。
+- **G4 可审计**：以多维度回溯证据链为目标。v0.1 实际范围：按 session / event id / 跨 session linker 关联（`linkedEvents`）回溯，外加按 git ref / image digest 自动串接 commit / PR / build / deploy 阶段；按时间窗 / actor / agent / 文件 / 需求 ID 等 fine-grained 检索是 v0.2+ 路线（详见 v0.1.0 release notes 的"已知限制"段）。
 - **G5 低侵入接入**：通过 hook / SDK / Git hook / CI 插件接入，不要求改造既有工作流。
 - **G6 供应链兼容**：在阶段边界输出符合 in-toto / SLSA 规范的 attestation，可被 cosign / policy controller 直接消费。
 
@@ -54,7 +54,7 @@ Agent Lens 是面向 Coding Agent 的**可观测、可追溯、可审计**系统
 2. **Ingest**：标准化事件 schema（参考 OpenTelemetry，扩展 AI 字段）。
 3. **Link**：基于 commit SHA、PR ID、session ID、需求 ID 跨阶段拼接。
 4. **Store**：append-only 事件流 + 内容寻址的 artifact 存储。
-5. **Query**：按 trace / 时间 / 人 / Agent / 文件 / 需求 ID 检索。
+5. **Query**：v0.1 提供 by-session / by-event-id / 跨 session linker 关联（depth 0-3，可达 sessions BFS）+ Sessions 列表（按 lastEventAt 排序，可选 `since` 时间过滤）。GraphQL 查询接口在 `internal/query/schema.graphql`。按时间窗 / actor / agent / 文件 / 需求 ID 等 fine-grained 检索是 v0.2+ 路线。
 6. **Visualize**：时间线 + 因果图 + 代码 diff 关联视图（"Lens UI"）。
 7. **Verify**：哈希链 + 签名 + replay。
 8. **Export**：阶段边界输出 in-toto attestation（含 SLSA provenance predicate）。
@@ -145,7 +145,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 ### 9.2 评审
 1. PR 创建时 GitHub App 上报 pr event。
 2. Linking worker 用 commit SHA 把 PR 关联到上游所有 turn。
-3. PR Bot 在 PR 上评论一段"Evidence Summary"链接到 Lens UI。
+3. PR Bot 在 PR 上评论一段"Evidence Summary"链接到 Lens UI。**v0.1 未交付**——见 §14 M2 注记，需先开 ADR 决定 outbound 形态（评论 vs status check vs LLM 自动审）+ 与 §13 self-hosted 调性的兼容路径。
 
 ### 9.3 构建与部署
 1. CI 插件上报 build event；产物 hash 写入 artifact store。
