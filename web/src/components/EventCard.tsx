@@ -2,6 +2,7 @@ import { lazy, Suspense, useMemo, useState } from "react";
 import type { Event } from "../types";
 import { styleFor, formatTimestamp } from "./kindStyle";
 import { payloadToDiff } from "../lib/payloadToDiff";
+import { RedactionChip } from "./RedactionChip";
 import { TokenUsageChip } from "./TokenUsageChip";
 
 // React.lazy keeps the ~600 KB Monaco bundle out of the eager chunk:
@@ -69,15 +70,21 @@ export function EventCard({ event }: { event: Event }) {
             {(() => {
               const n = redactedThinkingCount(event);
               return n > 0 ? (
-                <span
-                  className="inline-flex items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 ring-1 ring-zinc-300"
-                  title={`Claude Code dropped ${n} thinking block${n === 1 ? "" : "s"} from this message — only the signature was preserved in the transcript. Capturing the original thinking content requires §10.4 proxy mode.`}
-                >
-                  <span>🚫</span>
-                  <span>
-                    {n} thinking redacted
-                  </span>
-                </span>
+                <RedactionChip
+                  variant="thinking"
+                  label={`${n} thinking redacted`}
+                  tooltip={`Claude Code dropped ${n} thinking block${n === 1 ? "" : "s"} from this message — only the signature was preserved in the transcript. Capturing the original thinking content requires §10.4 proxy mode.`}
+                />
+              ) : null;
+            })()}
+            {(() => {
+              const n = redactedSecretCount(event);
+              return n > 0 ? (
+                <RedactionChip
+                  variant="secret"
+                  label={`${n} secret${n === 1 ? "" : "s"} redacted`}
+                  tooltip={`The hook's rule-based redactor (SPEC §12) caught ${n} suspected secret${n === 1 ? "" : "s"} in this event's text and replaced ${n === 1 ? "it" : "them"} with [REDACTED:<type>] before forwarding. The original content is NOT recoverable from the audit DB.`}
+                />
               ) : null;
             })()}
             {event.usage && (
@@ -255,6 +262,21 @@ function redactedThinkingCount(event: Event): number {
   const p = (event.payload ?? {}) as Record<string, unknown>;
   if (p.marker !== "assistant_message") return 0;
   const v = p.thinking_redacted_by_claude_code;
+  return typeof v === "number" && v > 0 ? v : 0;
+}
+
+// redactedSecretCount reads the count of secrets the hook's rule-based
+// redactor (SPEC §12 / internal/redact) caught and replaced in this
+// event's text. Set by the hook on PROMPT, THOUGHT, and DECISION
+// events when at least one pattern matched; absent / 0 elsewhere.
+//
+// Different from thinking-redacted: that's Claude Code dropping
+// content before it ever leaves the assistant; this is OUR redactor
+// catching secrets in content that DID make it to the hook. They're
+// surfaced as separate chips so audit readers can tell them apart.
+function redactedSecretCount(event: Event): number {
+  const p = (event.payload ?? {}) as Record<string, unknown>;
+  const v = p.redacted_count;
   return typeof v === "number" && v > 0 ? v : 0;
 }
 
