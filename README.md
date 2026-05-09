@@ -6,42 +6,74 @@
 
 ## 状态
 
-M1–M3 已交付，§17 dogfood 已激活——本仓库自身就是首个使用者。v0.1.0 personal-mode 发布筹备中（详见 [`docs/ADR/0006-release-and-distribution-v0.1.md`](./docs/ADR/0006-release-and-distribution-v0.1.md)）；当前安装路径仍是 build-from-source（见 §"一次跑通"）。Team mode、Helm chart、Windows、PR Review Bot outbound 等不在 v0.1 范围。
+**v0.1.0 personal-mode** 发布——单机单人 audit。完整 release notes：[`docs/RELEASE_NOTES_v0.1.0.md`](./docs/RELEASE_NOTES_v0.1.0.md)（含已知限制 + v0.2 路线）。Team mode、Helm chart、Windows、PR Review Bot outbound、跨 AI CLI（OpenCode 等）不在 v0.1 范围。
 
-## 一次跑通
+## 60 秒试用（v0.1.0 +）
+
+发布后用预编译二进制 + GHCR 镜像，最小依赖：
 
 ```bash
-# 1. 装工具链（macOS）
-brew install go pnpm buf node
-# golang-migrate 不再需要——server 启动时自动应用嵌入的 migrations
-# （如需外部迁移：AGENT_LENS_SKIP_MIGRATE=1 + brew install golang-migrate）
+# 1. 拉镜像 + 起 Postgres / MinIO / agent-lens（端口 8787）
+docker compose -f https://raw.githubusercontent.com/dong-qiu/agent-lens/v0.1.0/deploy/compose/docker-compose.yml up -d
 
-# 2. 启 Postgres + MinIO
-make compose-up
+# 2. 装 hook 二进制（macOS arm64 示例）
+curl -fsSL https://github.com/dong-qiu/agent-lens/releases/download/v0.1.0/agent-lens-hook-darwin-arm64 \
+  -o /usr/local/bin/agent-lens-hook
+chmod +x /usr/local/bin/agent-lens-hook
 
-# 3a. 开发模式：起后端（terminal 1）+ Vite 前端（terminal 2）
-make build && ./bin/agent-lens
-# 启动时自动 migrate up；监听 :8787 提供 /healthz, /v1/events (POST), /v1/graphql
-# /v1/playground 仅在 AGENT_LENS_PLAYGROUND=true 时挂载
-make web-install   # 首次
-make web-dev       # http://localhost:5173 (Vite，proxies /v1 到 :8787)
+# 3. 一行配 Claude Code hook（写到 ~/.claude/settings.json，幂等合并；保留你既有 hooks）
+agent-lens-hook setup --personal --skip-compose
+# 不带 --skip-compose 它会自动启 docker compose 给你；这里因为上面手动起了
 
-# 3b. 生产模式：UI 嵌入二进制由 / 直接服务
-make build-prod && ./bin/agent-lens
-# 浏览 http://localhost:8787 看 Lens UI；同端口走 GraphQL 与 API
-
-# 4. 装 Claude Code hook
-# 编辑 ~/.claude/settings.json，加入 hooks 指向 ./bin/agent-lens-hook claude
-# 详见下方 "接入 Claude Code"
-
-# 5. 装 git post-commit hook（在被观测的仓库里）
-ln -s "$(pwd)/bin/agent-lens-hook" .git/hooks/agent-lens-hook
+# 4. 装 git post-commit hook（在被观测的仓库里）
+ln -s "$(which agent-lens-hook)" .git/hooks/agent-lens-hook
 cat > .git/hooks/post-commit <<'EOF'
 #!/bin/sh
 exec .git/hooks/agent-lens-hook git-post-commit
 EOF
 chmod +x .git/hooks/post-commit
+
+# 5. 浏览 http://localhost:8787 看 Lens UI
 ```
+
+要卸：`agent-lens-hook setup --uninstall`（精确移除 hook 条目，留下你为其它工具写的部分）。
+
+### 验证下载（可选）
+
+v0.1.0 二进制由项目自有 ed25519 签名，公钥随 release 发出。**用 v0.1 工具校验 v0.1 二进制**——dogfood 的最强信号：
+
+```bash
+curl -fsSL https://github.com/dong-qiu/agent-lens/releases/download/v0.1.0/agent-lens-public.pem -o pubkey.pem
+agent-lens-hook verify-attestation \
+  --pub pubkey.pem \
+  --require-type "agent-lens.dev/release-artifact/v1" \
+  agent-lens-hook-darwin-arm64.sig
+# OK · payloadType application/vnd.in-toto+json · keyid <id>
+```
+
+`cosign` 用户走 [§ Cosign 兼容性](#cosign-兼容性) 段的 recipe（已实测）。
+
+## 改源码 / 贡献
+
+```bash
+# 1. 装开发工具链
+brew install go pnpm buf node            # golang-migrate 不需要：server 启动自迁移
+
+# 2. 起 Postgres + MinIO（开发期持久存）
+make compose-up
+
+# 3. 跑 server（dev 模式 = UI 走 vite dev server）
+make build && ./bin/agent-lens
+make web-install                         # 首次
+make web-dev                             # http://localhost:5173，proxies /v1 到 :8787
+
+# 3'. 或 prod 模式（UI 嵌入二进制）
+make build-prod && ./bin/agent-lens      # http://localhost:8787 直接看 UI
+
+# 4. 设置 hook（同上 60 秒段）
+```
+
+源码安装也通过 `setup --personal`（subcommand 来自 cmd/agent-lens-hook，build 出来跟二进制行为一致）。`go install ./cmd/agent-lens-hook` 后即可在任何目录调用。
 
 ## 测试
 
@@ -52,6 +84,8 @@ make web-build         # TS 类型检查 + Vite 打包
 ```
 
 ## 接入 Claude Code
+
+> **推荐用 `agent-lens-hook setup --personal`**（见上方"60 秒试用"段，幂等、保留你既有 hook 条目）。下面是 setup 命令的等价手动配置——如果你只想知道写了什么，或要做特殊定制（比如改 hook command 路径、加自定义 `matcher`），按这里写：
 
 在 `~/.claude/settings.json`（或仓库级 `.claude/settings.json`）添加：
 
