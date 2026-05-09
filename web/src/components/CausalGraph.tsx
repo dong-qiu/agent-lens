@@ -415,7 +415,25 @@ export function CausalGraph({
   const { data, error, isLoading } = useQuery<
     EventsResponse | LinkedEventsResponse
   >({
-    queryKey: linked ? ["linkedEvents", sessionId] : ["events", sessionId],
+    // limit/perSessionLimit is part of the cache key so changing the
+    // cap (e.g., during a UI fix iteration like 200→5000→200) busts
+    // stale cached event arrays — without this, react-query happily
+    // serves the OLDER (or larger) shape from a previous mount,
+    // which re-feeds dagre N×expected nodes and blows the stack.
+    queryKey: linked
+      ? ["linkedEvents", sessionId, 200]
+      : ["events", sessionId, 200],
+    // Graph view caps held at 200 (the pre-fix value). Empirical:
+    // 1000 nodes already block the main thread on the dogfood
+    // session — ReactFlow + dagre's combined cost (layout pass +
+    // node mounting + d3-zoom transforms) hits the page-freeze
+    // threshold well before we run out of memory. Asymmetric design
+    // is intentional:
+    //   - Timeline = full-record list view, render is cheap → 5000
+    //   - Graph    = visual summary, render is expensive → 200
+    // Past 200 nodes the graph is also visually unreadable, so the
+    // cap doubles as a UX guardrail. v0.1.x: real pagination + a
+    // "show window around timestamp" affordance for graph drill-down.
     queryFn: linked
       ? () =>
           gql<LinkedEventsResponse>(linkedEventsQuery, {

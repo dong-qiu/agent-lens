@@ -10,15 +10,25 @@ export function Timeline({ sessionId }: { sessionId: string }) {
   const [activeKinds, setActiveKinds] = useState<Set<EventKind>>(new Set());
 
   const { data, error, isLoading, isFetching } = useQuery({
-    queryKey: ["events", sessionId],
-    queryFn: () => gql<EventsResponse>(eventsQuery, { sessionId, limit: 200 }),
+    // limit IS part of the cache key — same pattern as CausalGraph —
+    // so a future change to the cap busts stale cached arrays rather
+    // than serving the previous shape across remounts. Without this,
+    // a Graph→Timeline toggle (different default caps) could re-use
+    // the wrong sized array.
+    queryKey: ["events", sessionId, 5000],
+    // limit=5000 covers a heavy dogfood session (the project's own
+    // capture is ~4200 events as of v0.1). Real "load more" pagination
+    // is v0.1.x polish; for v0.1 the priority is "session timeline
+    // doesn't silently drop recent events", which 200 was failing on
+    // any non-trivial session.
+    queryFn: () => gql<EventsResponse>(eventsQuery, { sessionId, limit: 5000 }),
     enabled: sessionId.length > 0,
     refetchInterval: 2000,
   });
 
   const counts = useMemo(() => countByKind(data?.events ?? []), [data?.events]);
   // Partial-total: client aggregation across only the events fetched
-  // (limit=200). For sessions ≤ 200 events this is exact; for larger
+  // (limit=5000). For sessions ≤ 5000 events this is exact; for larger
   // ones it under-counts. Truth-of-record `Session.totalUsage` is on
   // the SessionList row.
   const usageTotal = useMemo(
