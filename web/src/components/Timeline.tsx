@@ -10,7 +10,12 @@ export function Timeline({ sessionId }: { sessionId: string }) {
   const [activeKinds, setActiveKinds] = useState<Set<EventKind>>(new Set());
 
   const { data, error, isLoading, isFetching } = useQuery({
-    queryKey: ["events", sessionId],
+    // limit IS part of the cache key — same pattern as CausalGraph —
+    // so a future change to the cap busts stale cached arrays rather
+    // than serving the previous shape across remounts. Without this,
+    // a Graph→Timeline toggle (different default caps) could re-use
+    // the wrong sized array.
+    queryKey: ["events", sessionId, 5000],
     // limit=5000 covers a heavy dogfood session (the project's own
     // capture is ~4200 events as of v0.1). Real "load more" pagination
     // is v0.1.x polish; for v0.1 the priority is "session timeline
