@@ -41,6 +41,18 @@ hope that helps`,
 			wantCount:   1,
 		},
 		{
+			name:        "anthropic-api-key",
+			in:          "ANTHROPIC_API_KEY=sk-ant-api03-aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789AbCdEfGhIjKlMn",
+			wantPattern: "[REDACTED:anthropic-api-key]",
+			wantCount:   1,
+		},
+		{
+			name:        "anthropic-admin-key",
+			in:          "use sk-ant-admin01-XYZxyz0123456789_-abcdefghijklmnopqrstuvwxyzABCDEFGHIJ for org admin",
+			wantPattern: "[REDACTED:anthropic-api-key]",
+			wantCount:   1,
+		},
+		{
 			name:        "slack-bot",
 			in:          "use xoxb-12345-67890-12345-abcdef0123456789abcdef",
 			wantPattern: "[REDACTED:slack-token]",
@@ -137,6 +149,10 @@ func TestRedactNoFalsePositives(t *testing.T) {
 		"see the BEGIN PRIVATE KEY format docs",
 		// Code with bearer keyword but no value following
 		"// bearer tokens are in the header",
+		// Anthropic-prefix-only chatter without an actual key body
+		"the sk-ant prefix family is documented in their docs",
+		// sk-ant-* but with too-short body (under 40 chars)
+		"placeholder sk-ant-api03-tooshort here",
 	}
 	for _, in := range cases {
 		t.Run(in, func(t *testing.T) {

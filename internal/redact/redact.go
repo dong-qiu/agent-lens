@@ -48,6 +48,14 @@ var patterns = []pattern{
 		name: "github-token",
 		re:   regexp.MustCompile(`\bgh[oprsu]_[A-Za-z0-9]{36,}\b`),
 	},
+	// Anthropic API keys: sk-ant-api{version}- or sk-ant-admin{version}-
+	// followed by ≥40 chars of the body alphabet. The project's first-
+	// party agent IS Claude Code, so a user pasting their own Anthropic
+	// key into a prompt to debug an SDK call is a likely scenario.
+	{
+		name: "anthropic-api-key",
+		re:   regexp.MustCompile(`\bsk-ant-(?:api|admin)\d{2}-[A-Za-z0-9_\-]{40,}\b`),
+	},
 	// Slack bot/user tokens. Format xoxb-/xoxp-/xoxa-/xoxr-/xoxs-
 	// followed by digit-dash-segments.
 	{
