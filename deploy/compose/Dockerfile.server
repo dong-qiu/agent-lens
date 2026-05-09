@@ -3,12 +3,19 @@ FROM node:22-alpine AS web-build
 WORKDIR /web
 COPY web/package.json web/package-lock.json* web/pnpm-lock.yaml* ./
 RUN if [ -f pnpm-lock.yaml ]; then \
-        npm install -g pnpm && pnpm install --frozen-lockfile; \
+        npm install -g pnpm && \
+        pnpm install --frozen-lockfile --config.dangerouslyAllowAllBuilds=true; \
     elif [ -f package-lock.json ]; then \
         npm ci; \
     else \
         npm install; \
     fi
+# `--config.dangerouslyAllowAllBuilds=true`: pnpm v10+ defaults to
+# refusing build scripts in non-interactive contexts. esbuild's
+# postinstall downloads its native binary; without it vite build
+# fails. The web/package.json `pnpm.onlyBuiltDependencies: ["esbuild"]`
+# encodes our trust scope but pnpm v10 still requires the explicit
+# install-time flag for non-interactive (CI / Docker) runs.
 COPY web/ ./
 RUN if [ -f pnpm-lock.yaml ]; then pnpm build; else npm run build; fi
 
