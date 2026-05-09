@@ -29,6 +29,35 @@ func TestBuildEventsUserPrompt(t *testing.T) {
 	}
 }
 
+// TestBuildEventsUserPromptRedacts: the v0.1 redactor must run on
+// prompt content before the event hits ingest. Without this, a user
+// pasting a secret into a Claude prompt sees it land verbatim in the
+// audit DB — exactly the failure mode SPEC §12 promises to prevent.
+func TestBuildEventsUserPromptRedacts(t *testing.T) {
+	evs, _ := buildEvents(&claudeHookInput{
+		HookEventName: "UserPromptSubmit",
+		SessionID:     "s1",
+		Prompt:        "Help me debug: AKIAIOSFODNN7EXAMPLE",
+	})
+	if len(evs) != 1 {
+		t.Fatalf("got %d events, want 1", len(evs))
+	}
+	payload, _ := evs[0]["payload"].(map[string]any)
+	if payload == nil {
+		t.Fatalf("event has no payload: %+v", evs[0])
+	}
+	text, _ := payload["text"].(string)
+	if strings.Contains(text, "AKIAIOSFODNN7") {
+		t.Errorf("AWS access key leaked through redaction: %q", text)
+	}
+	if !strings.Contains(text, "[REDACTED:aws-access-key-id]") {
+		t.Errorf("expected [REDACTED:aws-access-key-id] marker in payload.text, got %q", text)
+	}
+	if n, _ := payload["redacted_count"].(int); n != 1 {
+		t.Errorf("redacted_count = %v, want 1", payload["redacted_count"])
+	}
+}
+
 func TestBuildEventsPreToolUse(t *testing.T) {
 	evs, _ := buildEvents(&claudeHookInput{
 		HookEventName: "PreToolUse",
