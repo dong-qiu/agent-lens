@@ -2,6 +2,7 @@ import { lazy, Suspense, useMemo, useState } from "react";
 import type { Event } from "../types";
 import { styleFor, formatTimestamp } from "./kindStyle";
 import { payloadToDiff } from "../lib/payloadToDiff";
+import { AgentDispatchChip } from "./AgentDispatchChip";
 import { RedactionChip } from "./RedactionChip";
 import { TokenUsageChip } from "./TokenUsageChip";
 
@@ -84,6 +85,17 @@ export function EventCard({ event }: { event: Event }) {
                   variant="secret"
                   label={`${n} secret${n === 1 ? "" : "s"} redacted`}
                   tooltip={`The hook's rule-based redactor (SPEC §12) caught ${n} suspected secret${n === 1 ? "" : "s"} in this event's text and replaced ${n === 1 ? "it" : "them"} with [REDACTED:<type>] before forwarding. The original content is NOT recoverable from the audit DB.`}
+                />
+              ) : null;
+            })()}
+            {(() => {
+              const info = agentDispatchInfo(event);
+              return info ? (
+                <AgentDispatchChip
+                  agentId={info.agentId}
+                  status={info.status}
+                  outputFile={info.outputFile}
+                  prompt={info.prompt}
                 />
               ) : null;
             })()}
@@ -263,6 +275,37 @@ function redactedThinkingCount(event: Event): number {
   if (p.marker !== "assistant_message") return 0;
   const v = p.thinking_redacted_by_claude_code;
   return typeof v === "number" && v > 0 ? v : 0;
+}
+
+// agentDispatchInfo extracts sub-agent dispatch metadata from a parent-
+// side TOOL_RESULT event whose tool name is "Agent" (Claude Code's
+// internal name for the Task-tool dispatch). Returns null on any other
+// event so the chip only shows where it's meaningful.
+//
+// Per ADR 0008: v0.1 surfaces this metadata so audit readers can see
+// "this is an agent dispatch, here's the agentId". The actual child
+// session is captured under a separate UUID (post-`setup --personal`)
+// but no automatic delegates link is emitted yet (issue #85, v0.2).
+function agentDispatchInfo(event: Event): {
+  agentId: string;
+  status?: string;
+  outputFile?: string;
+  prompt?: string;
+} | null {
+  if (event.kind !== "TOOL_RESULT") return null;
+  const p = (event.payload ?? {}) as Record<string, unknown>;
+  if (p.name !== "Agent") return null;
+  const resp = p.response;
+  if (!resp || typeof resp !== "object") return null;
+  const r = resp as Record<string, unknown>;
+  const agentId = r.agentId;
+  if (typeof agentId !== "string" || !agentId) return null;
+  return {
+    agentId,
+    status: typeof r.status === "string" ? r.status : undefined,
+    outputFile: typeof r.outputFile === "string" ? r.outputFile : undefined,
+    prompt: typeof r.prompt === "string" ? r.prompt : undefined,
+  };
 }
 
 // redactedSecretCount reads the count of secrets the hook's rule-based

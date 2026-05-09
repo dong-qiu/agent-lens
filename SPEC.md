@@ -179,6 +179,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 - `<synthetic>` 模型标记的消息（Claude Code 自身注入的 stop-sequence 占位，usage 全 0）按已知形态跳过 usage 提取，不报错、不丢消息体。
 - **思考内容（thinking 文本）**：Claude Code 写 transcript 时只保留 `signature` 字段，**原文不持久化**。§10.1 拿不到原文。每条 assistant 消息中被丢弃的 thinking 块**数量**显式记录在派生 DECISION 事件的 `payload.thinking_redacted_by_claude_code`，避免审计报告把"被吞"误读为"无思考"。要拿原文得走 §10.4。
 - 仍**没有**的能力：实时拦截 / token 流式即时反馈 / policy gate。要这些得走 §10.4。
+- **Sub-agent 派发**（Agent 工具）：父侧 tool_call/result 完整捕获（含 `response.agentId` 等元数据，UI 显式 surface）。子 session 在 user-global hook 装好（`agent-lens-hook setup --personal`）的前提下以独立 UUID session 捕获；父→子的自动 `delegates` link 留 v0.2，详见 ADR 0008 与追踪 issue #85。Audit reader 在 v0.1 通过 timestamp + prompt 文本人眼对应。
 
 ### 10.4 代理深模式（M4+，未启用）
 
