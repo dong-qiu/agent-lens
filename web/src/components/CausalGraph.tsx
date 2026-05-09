@@ -416,22 +416,25 @@ export function CausalGraph({
     EventsResponse | LinkedEventsResponse
   >({
     queryKey: linked ? ["linkedEvents", sessionId] : ["events", sessionId],
-    // Graph view is bounded at 1000 events for both single-session
-    // and cross-session modes. 5000 was empirically too much: dagre's
-    // O(V+E) layout pass blocks the main thread long enough that the
-    // page appears frozen on the dogfood session (~4200 events). The
-    // graph is also visually unreadable past ~1000 nodes — Timeline
-    // is the full-record view (limit 5000), Graph is the high-level
-    // summary. v0.1.x: real pagination + a "show all" affordance
-    // when summary needs deeper drill-down.
+    // Graph view caps held at 200 (the pre-fix value). Empirical:
+    // 1000 nodes already block the main thread on the dogfood
+    // session — ReactFlow + dagre's combined cost (layout pass +
+    // node mounting + d3-zoom transforms) hits the page-freeze
+    // threshold well before we run out of memory. Asymmetric design
+    // is intentional:
+    //   - Timeline = full-record list view, render is cheap → 5000
+    //   - Graph    = visual summary, render is expensive → 200
+    // Past 200 nodes the graph is also visually unreadable, so the
+    // cap doubles as a UX guardrail. v0.1.x: real pagination + a
+    // "show window around timestamp" affordance for graph drill-down.
     queryFn: linked
       ? () =>
           gql<LinkedEventsResponse>(linkedEventsQuery, {
             sessionId,
             depth: 1,
-            perSessionLimit: 1000,
+            perSessionLimit: 200,
           })
-      : () => gql<EventsResponse>(eventsQuery, { sessionId, limit: 1000 }),
+      : () => gql<EventsResponse>(eventsQuery, { sessionId, limit: 200 }),
     enabled: sessionId.length > 0,
     // Audit / graph view doesn't need 2s polling like Timeline — every
     // refetch reruns the dagre layout (O(N) on 200-300 nodes) which
