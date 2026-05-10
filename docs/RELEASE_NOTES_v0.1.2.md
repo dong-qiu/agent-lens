@@ -57,11 +57,13 @@ This release was validated in three stages — staged in time-order for honesty 
 
 **Post-merge / pre-tag** (between PR merge and `v0.1.2` tag):
 
-2. ✅ Pre-tag dispatch dry-run on `main` — re-runs the same path against the merged code, plus the new "Verify web bundle landed before go build" defensive check added during code review.
+2. ⏳ Pre-tag dispatch dry-run on `main` (planned post-merge): re-run the same path against the merged code, exercising the new "Verify web bundle landed before go build" defensive check added during code review.
 
 **Post-tag** (after `v0.1.2` is tagged and `release.yml` runs end-to-end):
 
-3. ✅ Real tag artifact: download `agent-lens-darwin-arm64` from the v0.1.2 GitHub release, `chmod +x`, run with `AGENT_LENS_STORE=memory`, `curl localhost:8787/` — must return HTML, not the stub message.
+3. ⏳ Real tag artifact (planned post-tag): download `agent-lens-darwin-arm64` from the v0.1.2 GitHub release, `chmod +x`, run with `AGENT_LENS_STORE=memory`, `curl localhost:8787/` — expect HTML, not the stub message.
+
+Status marks (`✅` / `⏳`) reflect what's done at the time this file is committed to `main` (PR-merge time). When you read this from the published v0.1.2 release, items 2 and 3 will have happened — but their *honest* state at notes-commit time is "planned". This explicit pre-/post- separation is the lesson learned from v0.1.1's release notes, which mixed past-tense claims that weren't yet true at PR-time.
 
 Per the [`/self-review`](https://github.com/dong-qiu/agent-lens/blob/main/.claude/skills/self-review/SKILL.md) skill's RELEASE_NOTES Phase 1 row added in [#96](https://github.com/dong-qiu/agent-lens/pull/96): "any quantitative claim about binary contents must be cross-checked against the actual dry-run artifact." The lesson cycle: v0.1.0 promised UI in binary → v0.1.1 carried the same false promise → v0.1.1 verification on a real laptop discovered it → v0.1.2 fixes + the next batch of release notes can't make the same claim without actually running the binary.
 
