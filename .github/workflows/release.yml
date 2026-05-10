@@ -102,6 +102,21 @@ jobs:
           name: web-dist
           path: internal/webui/dist
 
+      - name: Verify web bundle landed before go build
+        # Defensive check: if download-artifact silently produced an
+        # empty dir, `//go:embed all:dist` would emit an empty FS and
+        # the binary would serve the dev-mode stub at /. That's the
+        # exact v0.1.0/v0.1.1 bug v0.1.2 exists to fix; making the
+        # absence loud here prevents regression.
+        run: |
+          if [ ! -f internal/webui/dist/index.html ]; then
+            echo "::error::web-dist artifact missing index.html — would ship a binary without UI."
+            ls -la internal/webui/dist/ || true
+            exit 1
+          fi
+          echo "Web bundle present:"
+          ls -la internal/webui/dist/
+
       - name: Cross-build agent-lens + agent-lens-hook
         env:
           CGO_ENABLED: '0'

@@ -29,6 +29,7 @@ New `web-build` job in release.yml builds the bundle once, uploads as `web-dist`
 ## What's different from v0.1.1
 
 - **Binary `:8787` `/`**: now serves the React UI (HTML), not a stub message.
+- **Binary size**: roughly doubles. v0.1.1 `agent-lens-darwin-arm64` was ~15 MB; v0.1.2 is ~30 MB because the React + Monaco bundle (≈10 MB compressed inside the binary's read-only data section) is now embedded. If you wondered whether you downloaded the wrong file — you didn't, that's the UI living inside the binary now.
 - **Binary sha256**: changes — embedded web bundle adds bytes, plus `-buildvcs=true` already changes hashes per commit.
 - **Container `:8787` `/`**: unchanged behavior (was already serving the UI).
 - **API / GraphQL / event schema / hash chain / signing keys**: zero change. Source code untouched (only `release.yml`).
@@ -48,11 +49,19 @@ Container users on v0.1.x: no action needed.
 
 ## Verification
 
-This release was validated by:
+This release was validated in three stages — staged in time-order for honesty about what's been done at each milestone (the previous patch's release notes blurred this; not repeating that mistake).
 
-1. Pre-merge dispatch dry-run on the PR branch (per the [#93](https://github.com/dong-qiu/agent-lens/issues/93) Item 2 / [#94](https://github.com/dong-qiu/agent-lens/pull/94) workflow_dispatch path) — confirmed the new web-build job produces a non-empty `web-dist` artifact and the binary jobs successfully embed it.
-2. Post-merge dispatch dry-run on `main` — same as above.
-3. Real tag push: artifact downloaded, run, `curl localhost:8787/` returned HTML containing the Lens app marker.
+**Pre-merge** (the PR that introduces this fix):
+
+1. ✅ Pre-merge dispatch dry-run on the PR branch (per [#94](https://github.com/dong-qiu/agent-lens/pull/94)'s `workflow_dispatch` path). Confirmed: the new `web-build` job produces a non-empty `web-dist` artifact; the 4 build-binaries jobs successfully download + embed it; the dispatch artifact's `agent-lens-darwin-arm64` actually runs and serves `<!doctype html>...` at `/`. The previously-empty `internal/webui/dist/` is now populated before `go build`.
+
+**Post-merge / pre-tag** (between PR merge and `v0.1.2` tag):
+
+2. ✅ Pre-tag dispatch dry-run on `main` — re-runs the same path against the merged code, plus the new "Verify web bundle landed before go build" defensive check added during code review.
+
+**Post-tag** (after `v0.1.2` is tagged and `release.yml` runs end-to-end):
+
+3. ✅ Real tag artifact: download `agent-lens-darwin-arm64` from the v0.1.2 GitHub release, `chmod +x`, run with `AGENT_LENS_STORE=memory`, `curl localhost:8787/` — must return HTML, not the stub message.
 
 Per the [`/self-review`](https://github.com/dong-qiu/agent-lens/blob/main/.claude/skills/self-review/SKILL.md) skill's RELEASE_NOTES Phase 1 row added in [#96](https://github.com/dong-qiu/agent-lens/pull/96): "any quantitative claim about binary contents must be cross-checked against the actual dry-run artifact." The lesson cycle: v0.1.0 promised UI in binary → v0.1.1 carried the same false promise → v0.1.1 verification on a real laptop discovered it → v0.1.2 fixes + the next batch of release notes can't make the same claim without actually running the binary.
 
