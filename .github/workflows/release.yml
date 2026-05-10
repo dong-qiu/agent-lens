@@ -16,6 +16,12 @@ name: Release
 
 on:
   push:
+    # `v*.*.*` matches both stable (`v0.1.0`) and RC (`v0.2.0-rc1`)
+    # tags — GitHub's `*` glob matches any non-`/` character including
+    # `-`, so this single pattern catches everything we want. The
+    # stable-vs-prerelease distinction is enforced downstream by
+    # `prerelease: ${{ contains(github.ref_name, '-rc') }}` in the gh
+    # release step + tag selection in build-image. Per issue #93 Item 5.
     tags: ['v*.*.*']
   # workflow_dispatch (added per issue #93 Item 2 after v0.1.0 iterated
   # 4× on first-tag-cut): manually trigger this pipeline against any
@@ -131,6 +137,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute image tags
+        id: tags
+        # Dispatch (any kind): single synthetic tag dispatch-<run_id> so
+        # docker/build-push-action accepts the OCI tag format.
+        # Final tag push (no -rc): version tag + :latest (latest follows
+        # final releases only).
+        # RC tag push (e.g. v0.2.0-rc1): version tag only — :latest must
+        # NOT advance to a prerelease (matches the gh release prerelease:
+        # field below; #93 Item 5).
+        run: |
+          set -e
+          IMAGE=ghcr.io/dong-qiu/agent-lens
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAGS="$IMAGE:dispatch-${{ github.run_id }}"
+          elif [[ "${{ github.ref_name }}" == *-rc* ]]; then
+            TAGS="$IMAGE:${{ github.ref_name }}"
+          else
+            TAGS="$IMAGE:${{ github.ref_name }}"$'\n'"$IMAGE:latest"
+          fi
+          {
+            echo "tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Computed image tags:"
+          echo "$TAGS"
+
       - name: Build + push image
         uses: docker/build-push-action@v5
         with:
@@ -152,16 +185,7 @@ jobs:
           # registry write — lets us validate pipeline changes without
           # polluting :latest.
           push: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) }}
-          # On tag push: tag the image with the version (e.g. v0.1.0).
-          # On workflow_dispatch: github.ref_name is the branch name, which
-          # commonly contains '/' (e.g. feat/foo) — invalid as an OCI tag, so
-          # docker/build-push-action rejects it even with push:false. Use a
-          # synthetic dispatch-<run_id> tag instead. (This bug was caught by
-          # the very first dry-run we ran on this branch — exactly the class
-          # of failure issue #93 Item 2 exists to surface pre-tag.)
-          tags: |
-            ghcr.io/dong-qiu/agent-lens:${{ github.event_name == 'push' && github.ref_name || format('dispatch-{0}', github.run_id) }}
-            ghcr.io/dong-qiu/agent-lens:latest
+          tags: ${{ steps.tags.outputs.tags }}
           # Container-image cosign signing deferred to v0.2 (different
           # signing path than the release-artifact DSSE attestations
           # signed in build-binaries above).
@@ -232,6 +256,10 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
+          # Tags matching `v*.*.*-rc*` (e.g. v0.2.0-rc1) ship as
+          # prerelease — `releases/latest/...` URLs and ghcr.io :latest
+          # skip them. Stable tags (v*.*.*) ship as latest.
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |

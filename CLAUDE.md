@@ -32,13 +32,35 @@ These were settled during initial scoping and are referenced throughout `SPEC.md
 
 ## Self-review before merge
 
-**Run `/self-review` before submitting any self-review summary or merging a PR.** The skill (in `.claude/skills/self-review/SKILL.md`) runs the mechanical pass automatically (git staging hygiene, codegen drift, tests, typecheck, debug-marker scan), walks the judgment-pass prompts, recommends `/review` or `/ultrareview` escalation when the PR warrants it, and ends with an explicit "what this review didn't cover" disclaimer.
+**Run `/self-review` before submitting any self-review summary or merging a PR.** The skill (in `.claude/skills/self-review/SKILL.md`) runs the mechanical pass automatically (git staging hygiene, codegen drift, tests, typecheck, debug-marker scan, Dockerfile build, actionlint, release.yml dry-run, RELEASE_NOTES quantitative-claim cross-check), walks the judgment-pass prompts, recommends `/review` or `/ultrareview` escalation when the PR warrants it, and ends with an explicit "what this review didn't cover" disclaimer.
 
-The skill exists because passive checklists (this file alone) didn't prevent the failure modes that motivated it — codegen drift, accidental file inclusion, repeated UX misses. Mechanical hygiene is enforced by code that runs, not docs that have to be remembered.
+The skill exists because passive checklists (this file alone) didn't prevent the failure modes that motivated it — codegen drift, accidental file inclusion, repeated UX misses, Dockerfile breakage shipped to tag, release-notes hash overclaims. Mechanical hygiene is enforced by code that runs, not docs that have to be remembered.
 
 **Self-review structurally cannot cover** UX latency, visual rendering, layout shift, or perception. Static analysis won't see a 700 ms tooltip delay or a misaligned chip. The skill surfaces these as explicit "manual smoke needed" handoffs to the user — not as items the review claims to subsume.
 
 **Post-merge calibration**: if CI catches something `/self-review` missed, add a check to the skill's Phase 1. The next contributor (or future-me) inherits the lesson via skill update, not by reading docs.
+
+## Risk-asymmetric files require `/review`
+
+Per [#93](https://github.com/dong-qiu/agent-lens/issues/93) Item 7. Some files have asymmetric blast radius: a missed bug propagates to all users (release pipeline) or breaks the integrity guarantees the project exists to provide (attestation, hash chain). Self-review alone is insufficient for these.
+
+Any PR touching the following **must have `/review` invoked** before merge (the `/self-review` skill's Phase 3 escalates this automatically):
+
+- `.github/workflows/release.yml` — broken release.yml = hours of GHA + tag-rebase friction (v0.1.0 ate 4 iterations / ~6h on this lesson)
+- `deploy/compose/Dockerfile*` — ships in every container image; PR-time CI catches build breakage but not runtime semantics
+- `internal/attest/*` — DSSE envelope / in-toto predicate construction; signing or verifying wrong = silently-broken supply chain
+- `internal/hashchain/*` — chain integrity primitive; bug here invalidates `verify` claims
+
+For these paths, `/review` is project policy, not a soft suggestion.
+
+## Release versioning + RC tag pattern
+
+Per [#93](https://github.com/dong-qiu/agent-lens/issues/93) Item 5:
+
+- **Stable release**: tag `vX.Y.Z` (e.g. `v0.1.1`). Marked latest; `/releases/latest/...` redirects, `:latest` ghcr tag advances.
+- **Release candidate**: tag `vX.Y.Z-rcN` (e.g. `v0.2.0-rc1`). Marked **prerelease** automatically; `/releases/latest/...` and `:latest` skip it. Use when the dispatch dry-run path can't cover the test (e.g. asking external testers to install via stable URL pattern, or testing the full `gh release create` codepath end-to-end).
+- **Pre-tag validation**: prefer `gh workflow run release.yml --ref <branch> -f dry_run=true` (cheaper than RC tags; no public artifact). RC tags are for the cases dry-run can't reach.
+- **RC suffix is lowercase `-rc`** (not `-RC`, `-Rc`). The release.yml RC detection uses case-sensitive `contains(github.ref_name, '-rc')` and `[[ ... == *-rc* ]]`. A tag like `v1.0.0-RC1` would be incorrectly published as **stable** and advance `:latest`. Stick to lowercase.
 
 ## Local development with persistence
 
