@@ -108,3 +108,26 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+
+  # Catches Dockerfile breakage on every PR — added per issue #93 Item 1
+  # after v0.1.0 first-tag-cut iterated 3 times on Dockerfile issues
+  # (pnpm safety check + QEMU arm64 timeout) that all would have surfaced
+  # locally but didn't because we only built it via the release pipeline.
+  # Single-arch (linux/amd64, native runner) keeps the job fast (~2 min
+  # cached); multi-arch is release.yml's job.
+  dockerfile-build:
+    name: Dockerfile build (linux/amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/compose/Dockerfile.server
+          push: false
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
