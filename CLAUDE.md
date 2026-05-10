@@ -60,6 +60,7 @@ Per [#93](https://github.com/dong-qiu/agent-lens/issues/93) Item 5:
 - **Stable release**: tag `vX.Y.Z` (e.g. `v0.1.1`). Marked latest; `/releases/latest/...` redirects, `:latest` ghcr tag advances.
 - **Release candidate**: tag `vX.Y.Z-rcN` (e.g. `v0.2.0-rc1`). Marked **prerelease** automatically; `/releases/latest/...` and `:latest` skip it. Use when the dispatch dry-run path can't cover the test (e.g. asking external testers to install via stable URL pattern, or testing the full `gh release create` codepath end-to-end).
 - **Pre-tag validation**: prefer `gh workflow run release.yml --ref <branch> -f dry_run=true` (cheaper than RC tags; no public artifact). RC tags are for the cases dry-run can't reach.
+- **RC suffix is lowercase `-rc`** (not `-RC`, `-Rc`). The release.yml RC detection uses case-sensitive `contains(github.ref_name, '-rc')` and `[[ ... == *-rc* ]]`. A tag like `v1.0.0-RC1` would be incorrectly published as **stable** and advance `:latest`. Stick to lowercase.
 
 ## Local development with persistence
 
