@@ -17,6 +17,17 @@ name: Release
 on:
   push:
     tags: ['v*.*.*']
+  # workflow_dispatch (added per issue #93 Item 2 after v0.1.0 iterated
+  # 4× on first-tag-cut): manually trigger this pipeline against any
+  # branch BEFORE tagging, with --dry-run skipping GHCR push and the
+  # GitHub Release create step. Lets us validate end-to-end pipeline
+  # changes without burning a real tag-rebase cycle.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — skip GHCR push + GitHub Release create (default true)'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -136,7 +147,11 @@ jobs:
           # Binaries are still cross-built for darwin/linux × amd64/arm64
           # in build-binaries; arm64 users have a native binary path.
           platforms: linux/amd64
-          push: true
+          # push only on real tag push, OR explicit non-dry-run
+          # workflow_dispatch. Dry-run builds the image but skips
+          # registry write — lets us validate pipeline changes without
+          # polluting :latest.
+          push: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) }}
           tags: |
             ghcr.io/dong-qiu/agent-lens:${{ github.ref_name }}
             ghcr.io/dong-qiu/agent-lens:latest
@@ -147,6 +162,11 @@ jobs:
   release:
     name: gh release
     needs: [build-binaries, build-image]
+    # Skip on dry-run workflow_dispatch — binaries + signatures are
+    # still uploaded as workflow run artifacts (build-binaries job),
+    # so reviewers can pull them for verify; we just don't create a
+    # public GitHub Release.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
     runs-on: ubuntu-latest
     permissions:
       contents: write
