@@ -31,8 +31,8 @@ Then, conditionally:
 | Any `web/**/*.{ts,tsx,css}` | `(cd web && npx tsc --noEmit)` | exit 0 |
 | Any `deploy/compose/Dockerfile*` | `docker build -f deploy/compose/Dockerfile.server .` (CI also runs this per #94; local is fast-feedback) | exit 0, OR explicitly note "skipped — Docker unavailable, CI will catch" |
 | Any `.github/workflows/*.yml` | `actionlint .github/workflows/<file>` (skip if not installed; flag as gap) | exit 0 |
-| Any `.github/workflows/release.yml` | `gh workflow run release.yml --ref <branch> -f dry_run=true` then `gh run watch <id>` — REQUIRED before merge | run completes green, no unexpected failures |
-| Any `docs/RELEASE_NOTES_*.md` | Re-read every claim of the form "hash X = Y", "binaries byte-equal", "deterministic build", "no functional change" → cross-check against actual dry-run artifact (`gh run download`) and `git diff origin/main..HEAD --stat` | every claim verified or rephrased |
+| Any `.github/workflows/release.yml` | Trigger dry-run + watch to completion. Two steps: `gh workflow run release.yml --ref <branch> -f dry_run=true`, then look up the run id (`gh run list --workflow=release.yml --limit 1`) and `gh run watch <id> --exit-status`. REQUIRED before merge — actionlint above is static; this is the only dynamic check that exercises the YAML against real GitHub. | run completes green, no unexpected failures |
+| Any `docs/RELEASE_NOTES_*.md` | Cross-check every quantitative claim ("byte-equal", "same sha256", "deterministic build", "X bytes") against actual dry-run artifact (`gh run download <id>` then `sha256sum`). Don't write hash claims you haven't verified. | every quantitative claim verified or rephrased |
 | (always) | `git diff origin/main..HEAD \| grep -nE 'DEBUG\|console\.log\|debugger\|FIXME\|XXX'` | no matches |
 | (always) | `git status --short \| grep '^??'` | confirm any untracked files are intentionally NOT in the PR |
 
