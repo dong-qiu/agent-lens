@@ -196,7 +196,12 @@ jobs:
           # internal sha256 in the in-toto subject — checksums.txt is
           # a quick out-of-band integrity check for users who don't want
           # to verify the DSSE envelope.
-          sha256sum agent-lens-* agent-lens-hook-* \
+          # The single `agent-lens-*` glob already matches both
+          # `agent-lens-darwin-*` and `agent-lens-hook-darwin-*` etc.;
+          # an earlier release.yml had `agent-lens-* agent-lens-hook-*`
+          # which double-listed every hook binary in v0.1.0's
+          # checksums.txt. Single glob avoids that.
+          sha256sum agent-lens-* \
             | grep -v '\.sig$' \
             | sort \
             > checksums.txt

@@ -8,16 +8,17 @@
 
 **v0.1.0 personal-mode** 发布——单机单人 audit。完整 release notes：[`docs/RELEASE_NOTES_v0.1.0.md`](./docs/RELEASE_NOTES_v0.1.0.md)（含已知限制 + v0.2 路线）。Team mode、Helm chart、Windows、PR Review Bot outbound、跨 AI CLI（OpenCode 等）不在 v0.1 范围。
 
-## 60 秒试用（v0.1.0 +）
+## 60 秒试用（v0.1+）
 
-发布后用预编译二进制 + GHCR 镜像，最小依赖：
+发布后用预编译二进制 + GHCR 镜像，最小依赖。下面 URL 用 `latest`/`main` 自动指向最新 release，避免每次 patch 都要改 README：
 
 ```bash
 # 1. 拉镜像 + 起 Postgres / MinIO / agent-lens（端口 8787）
-docker compose -f https://raw.githubusercontent.com/dong-qiu/agent-lens/v0.1.0/deploy/compose/docker-compose.yml up -d
+#    compose 文件取 main 分支（dev-stable，结构基本不变）
+docker compose -f https://raw.githubusercontent.com/dong-qiu/agent-lens/main/deploy/compose/docker-compose.yml up -d
 
 # 2. 装 hook 二进制（macOS arm64 示例）
-curl -fsSL https://github.com/dong-qiu/agent-lens/releases/download/v0.1.0/agent-lens-hook-darwin-arm64 \
+curl -fsSL https://github.com/dong-qiu/agent-lens/releases/latest/download/agent-lens-hook-darwin-arm64 \
   -o /usr/local/bin/agent-lens-hook
 chmod +x /usr/local/bin/agent-lens-hook
 
@@ -40,10 +41,10 @@ chmod +x .git/hooks/post-commit
 
 ### 验证下载（可选）
 
-v0.1.0 二进制由项目自有 ed25519 签名，公钥随 release 发出。**用 v0.1 工具校验 v0.1 二进制**——dogfood 的最强信号：
+release 二进制由项目自有 ed25519 签名，公钥随 release 发出。**用 v0.1 工具校验 v0.1 二进制**——dogfood 的最强信号：
 
 ```bash
-curl -fsSL https://github.com/dong-qiu/agent-lens/releases/download/v0.1.0/agent-lens-public.pem -o pubkey.pem
+curl -fsSL https://github.com/dong-qiu/agent-lens/releases/latest/download/agent-lens-public.pem -o pubkey.pem
 agent-lens-hook verify-attestation \
   --pub pubkey.pem \
   --require-type "agent-lens.dev/release-artifact/v1" \
