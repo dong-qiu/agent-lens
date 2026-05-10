@@ -5,7 +5,7 @@ description: Pre-merge self-review checklist for the agent-lens repo. Runs the m
 
 # /self-review
 
-Pre-merge ritual codified from observed failure modes during ADR 0002 phase A/B (#63, #67) and the graph/chip tooltip work (#61, #67). Three passes plus a coverage disclaimer.
+Pre-merge ritual codified from observed failure modes during ADR 0002 phase A/B (#63, #67), the graph/chip tooltip work (#61, #67), and the v0.1.0 first-tag-cut iterations ([#93](https://github.com/dong-qiu/agent-lens/issues/93)). Three passes plus a coverage disclaimer.
 
 The mechanical pass MUST run before any human-judgment review — past misses (codegen drift, `git add -A` sweeping ADR drafts) were all binary checks dressed up as judgment problems.
 
@@ -29,6 +29,10 @@ Then, conditionally:
 | Any `internal/query/schema.graphql` or `gqlgen.yml` | `make gqlgen && git diff --exit-code` | exit 0 |
 | Any `*.go` | `go test ./... -count=1 && go vet ./...` | both exit 0 |
 | Any `web/**/*.{ts,tsx,css}` | `(cd web && npx tsc --noEmit)` | exit 0 |
+| Any `deploy/compose/Dockerfile*` | `docker build -f deploy/compose/Dockerfile.server .` (CI also runs this per #94; local is fast-feedback) | exit 0, OR explicitly note "skipped — Docker unavailable, CI will catch" |
+| Any `.github/workflows/*.yml` | `actionlint .github/workflows/<file>` (skip if not installed; flag as gap) | exit 0 |
+| Any `.github/workflows/release.yml` | `gh workflow run release.yml --ref <branch> -f dry_run=true` then `gh run watch <id>` — REQUIRED before merge | run completes green, no unexpected failures |
+| Any `docs/RELEASE_NOTES_*.md` | Re-read every claim of the form "hash X = Y", "binaries byte-equal", "deterministic build", "no functional change" → cross-check against actual dry-run artifact (`gh run download`) and `git diff origin/main..HEAD --stat` | every claim verified or rephrased |
 | (always) | `git diff origin/main..HEAD \| grep -nE 'DEBUG\|console\.log\|debugger\|FIXME\|XXX'` | no matches |
 | (always) | `git status --short \| grep '^??'` | confirm any untracked files are intentionally NOT in the PR |
 
@@ -55,6 +59,7 @@ Walk through each prompt and produce a real answer; vague or absent answers are 
 Inspect the changed paths to decide whether to recommend a fresh-context second opinion:
 
 - Touches `internal/query/schema.graphql`, `proto/*.proto`, `cmd/*/main.go` (CLI surface), `internal/attest/*` (attestation predicates), or `internal/hashchain/*` (chain integrity): **recommend `/review`**.
+- Touches `.github/workflows/release.yml` or `deploy/compose/Dockerfile*` (release pipeline; asymmetric blast radius — a broken release.yml costs hours of GHA runtime + tag-rebase friction): **recommend `/review` with a hostile-reviewer brief specifically asking "what fails if this runs against a non-default branch / dirty working tree / new platform?"** (per [#93](https://github.com/dong-qiu/agent-lens/issues/93) Item 7).
 - Spans 3+ packages OR includes both Go backend and `web/`: **surface to the user about running `/ultrareview`** (it's user-triggered and billed; cannot be launched directly).
 
 For < 100 LOC single-concern PRs, mechanical + judgment passes are sufficient.
@@ -80,6 +85,9 @@ If a new class of miss recurs, add a phase-1 check for it.
 - **`git add -A` trap**: three unrelated ADR drafts in untracked working tree got swept into a commit; required soft-reset + force-push. Phase 1 explicitly lists untracked files so you choose what to stage.
 - **UX-miss repetition**: 700 ms native-`title` tooltip delay was hit on graph node (#61), fixed via React state + portal, then **identically repeated** on token chip (#67) — same root cause, same fix, missed by self-review both times. Phase 2's UX prompt and Phase 4's coverage disclaimer push these onto manual smoke instead of pretending self-review covers them.
 - **"Fine for v1" orphan comments**: deferred trade-offs that aren't tracked become invisible. Phase 2 forces the resolve-or-ticket discipline that produced #58 / #62 / #65 / #66.
+- **Dockerfile breakage shipped to tag** (v0.1.0 iter 1+2 / [#90](https://github.com/dong-qiu/agent-lens/pull/90), [#91](https://github.com/dong-qiu/agent-lens/pull/91)): `docker build -f deploy/compose/Dockerfile.server .` locally would have caught both iterations (pnpm safety check), but self-review didn't watch Dockerfile changes. CI now also catches via [#94](https://github.com/dong-qiu/agent-lens/pull/94)'s `dockerfile-build` job; phase 1 still asks the local check for fast feedback.
+- **release.yml self-test gap** (v0.1.0 iter 3 / [#92](https://github.com/dong-qiu/agent-lens/pull/92)): the QEMU arm64 emulation issue was structurally invisible to PR review because release.yml triggered only on tag push. PR [#94](https://github.com/dong-qiu/agent-lens/pull/94) added `workflow_dispatch dry_run`; phase 1 now requires running it on the PR branch BEFORE merge whenever release.yml is touched.
+- **Release-notes overclaim** (v0.1.1): I wrote "v0.1.1 binaries are byte-equal to v0.1.0" in release notes, which was false — Go's `-buildvcs=true` (default) embeds the commit hash into `runtime/debug.BuildInfo`, so different commits ⇒ different binaries even with `-trimpath`. Caught by the pre-tag dry-run when I cross-checked the artifact sha256 against v0.1.0's. Phase 1's `RELEASE_NOTES_*.md` row exists to force this verification before tag.
 
 ## What this skill does NOT cover
 
