@@ -10,9 +10,11 @@ v0.1.0 之后第一个 patch。**不是功能版本**——v0.1.1 二进制和 v
 
 ## 没动什么
 
-- **二进制内容**：`-trimpath -ldflags="-s -w"` 让 Go 在源码相同时产出字节相等的二进制，所以 v0.1.1 的二进制 sha256 应等于 v0.1.0 的。`.sig` 文件因为 `BuiltAt` 时间戳不同会变。
+- **源代码**：v0.1.1 没动任何 `.go` 文件，功能上和 v0.1.0 等价。
 - **API / event schema / GraphQL**：零变化。
 - **docs**：除了 `RELEASE_NOTES_v0.1.1.md` 自身、README 把 download URL 改成 `releases/latest/download/`（消除未来 patch 的 README churn）外，无变化。
+
+注：**二进制 sha256 会变**，即使源码没动。Go `go build` 默认 `-buildvcs=true`，把 commit hash 嵌进 binary 的 `runtime/debug.BuildInfo`；v0.1.0 和 v0.1.1 在不同 commit 上构建，所以 hash 不同。功能等价 ≠ 字节相等。如果哪天 v0.1.x patch 想做"字节级可重现"，release.yml 加 `-buildvcs=false` 即可（[#93](https://github.com/dong-qiu/agent-lens/issues/93) 余下条目再考虑）。
 
 ## 升级
 
