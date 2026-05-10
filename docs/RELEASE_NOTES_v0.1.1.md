@@ -6,7 +6,7 @@ v0.1.0 之后第一个 patch。**不是功能版本**——v0.1.1 二进制和 v
 
 - **`checksums.txt` 去重**（v0.1.0 latent bug）：v0.1.0 的 `checksums.txt` 把 `agent-lens-hook-*` 4 个文件每个列了两遍——`sha256sum agent-lens-* agent-lens-hook-*` 两个 glob 互相覆盖。`sha256sum --check` 通过性不受影响，但看着不专业。v0.1.1 改成单 glob `sha256sum agent-lens-*`（已包含 hook 二进制）。
 - **CI 端 Dockerfile build 验证**（[#94](https://github.com/dong-qiu/agent-lens/pull/94)）：每个 PR 现在会 build 一次 `Dockerfile.server`（linux/amd64，no push）。v0.1.0 的前 3 次 tag 失败（pnpm safety check / QEMU arm64 timeout）都属于"PR 阶段本可 catch"的 Dockerfile 问题，此后这一类不再带到 tag 之后。
-- **release.yml 加 `workflow_dispatch` 触发器**（[#94](https://github.com/dong-qiu/agent-lens/pull/94)）：在 tag 之前可以 `gh workflow run release.yml -f dry_run=true` 干跑整条 pipeline——build + sign 都跑，但 GHCR 不 push、GitHub Release 不创。**v0.1.1 自身就是用这个机制 pre-tag 验过的**——dry-run 在 PR 分支上立刻 catch 到一个潜伏的 image-tag bug（branch 名含 `/`，OCI 拒），合 PR 前修了。
+- **release.yml 加 `workflow_dispatch` 触发器**（[#94](https://github.com/dong-qiu/agent-lens/pull/94)）：在 tag 之前可以 `gh workflow run release.yml -f dry_run=true` 干跑整条 pipeline——build + sign 都跑，但 GHCR 不 push、GitHub Release 不创。**v0.1.1 也用这个机制 pre-tag 验过**——main 分支 dry-run 一遍，确认 checksums.txt 是 8 唯一行。机制本身的可信度在 PR #94 上验过：dry-run 在引入 `workflow_dispatch` 的 PR 分支上立刻 catch 到 image-tag bug（branch 名含 `/`，OCI 拒），合 PR 前修了。
 
 ## 没动什么
 
