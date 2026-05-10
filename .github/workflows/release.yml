@@ -39,8 +39,46 @@ permissions:
   contents: read
 
 jobs:
+  # Build the Lens UI bundle once and share it with every binary job
+  # via upload/download-artifact. Without this step the agent-lens
+  # binaries shipped with empty internal/webui/dist (only .gitkeep),
+  # so `//go:embed all:dist` produced an empty FS and `/` served the
+  # dev-mode stub instead of the React app — discovered when we
+  # smoke-tested the v0.1.1 release on a real arm64 Mac.
+  # Pattern matches ci.yml's `web` job + release.yml's existing
+  # upload/download-artifact flow for the binaries themselves.
+  # The Dockerfile still builds the web bundle in its own multi-stage
+  # build (working since v0.1.0) — a small duplication kept on
+  # purpose so this PR doesn't disturb the working container path.
+  # #93 Item 4 (v0.2) will consolidate.
+  web-build:
+    name: web bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 7
+
   build-binaries:
     name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: web-build
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -57,6 +95,27 @@ jobs:
         with:
           go-version: '1.25'
           cache: true
+
+      - name: Download web bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: internal/webui/dist
+
+      - name: Verify web bundle landed before go build
+        # Defensive check: if download-artifact silently produced an
+        # empty dir, `//go:embed all:dist` would emit an empty FS and
+        # the binary would serve the dev-mode stub at /. That's the
+        # exact v0.1.0/v0.1.1 bug v0.1.2 exists to fix; making the
+        # absence loud here prevents regression.
+        run: |
+          if [ ! -f internal/webui/dist/index.html ]; then
+            echo "::error::web-dist artifact missing index.html — would ship a binary without UI."
+            ls -la internal/webui/dist/ || true
+            exit 1
+          fi
+          echo "Web bundle present:"
+          ls -la internal/webui/dist/
 
       - name: Cross-build agent-lens + agent-lens-hook
         env:
