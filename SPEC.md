@@ -1,7 +1,9 @@
 # Agent Lens — 项目 SPEC
 
-> 版本：v0.5（2026-04-28）
+> 版本：v0.6（2026-05-12）
 > 状态：草案 / 规划阶段
+>
+> v0.6 变更：把"agent 决策时所处配置"、"人对 agent 行为的反馈"、"context 在 turn 间的有损变换"分别升为头等事件，新增 EventKind `agent_config_snapshot` / `human_intervention` / `context_transform`。新增 Link.relation `intervenes`。新增 R8（compaction 启发式建模）。capture-time attestation 内联进配置快照，与事件 hash chain 同节点定锚。详见 `docs/ADR/0003-agent-config-snapshot.md` / `0004-human-intervention-events.md` / `0005-context-transform-events.md`。
 >
 > v0.5 变更：把每轮交互的 token 用量纳入证据链。撤回 v0.4 §10.1/§17 关于"hook 路径不抓 token / stop_reason"的限制（已被 transcript 验证证伪）。**价格 / 费用估算明确排除在 v1 范围之外**——多厂商计费结构差异大,token 数才是审计相关原语。详见 `docs/ADR/0002-token-usage-and-cost.md`。
 
@@ -47,6 +49,9 @@ Agent Lens 是面向 Coding Agent 的**可观测、可追溯、可审计**系统
 - **Trace / Evidence Chain**：以某目标（如一次 deploy）为根，反向展开的全部上游事件。
 - **Attestation**：对一段 trace 的签名声明，按 in-toto DSSE 信封格式输出。
 - **TokenUsage**：单条 assistant 消息的 token 计量（input / output / cache_read / cache_write 5m / cache_write 1h / web_search / web_fetch + model + service_tier）。供应商无关 schema，vendor 字段标注来源。**v1 只记录 token 数，不计算费用**——多厂商计费结构差异大且易变,留给下游消费者按需自行计算。详见 ADR 0002。
+- **AgentConfigSnapshot**：agent 决策时刻所处配置的快照——指令栈（CLAUDE.md hierarchy）、settings*.json、agents / commands / skills 文件、permission mode、采集器二进制 hash。内容走 artifact store 内容寻址，事件 payload 只引 hash。SessionStart + 配置漂移触发，不每 turn 重发。详见 ADR 0003。
+- **HumanIntervention**：人对 agent 行为的反馈事件，sub_kind 含 permission_decision / interrupt / prompt_revision / review_decision / merge_override / permission_config_change / manual_edit。与既有 tool_call / review 事件共存，通过 `target_event_id` 链回被介入的 agent 动作。详见 ADR 0004。
+- **ContextTransform**：agent 上下文窗口在 turn 之间发生的有损变换，sub_kind 含 compaction / truncation / system_reminder_injection。`loss_hint.confidence` 区分 observed（transcript 直接读到）与 inferred（从 token-budget 启发式推断）。详见 ADR 0005。
 
 ## 6. 核心能力
 
@@ -70,6 +75,9 @@ Event {
   kind: prompt | thought | tool_call | tool_result
        | code_change | commit | pr | test_run
        | build | deploy | review | decision
+       | agent_config_snapshot                           // ADR 0003
+       | human_intervention                              // ADR 0004
+       | context_transform                               // ADR 0005
   payload: <kind-specific JSON>
   parents: [event_id]      // 因果上游
   refs:    [artifact_id]
@@ -87,6 +95,7 @@ Artifact {
 Link {
   from_event, to_event
   relation: produces | references | reviews | builds | deploys
+         | intervenes                                    // ADR 0004：human_intervention → target agent event
   confidence: 0.0..1.0
   inferred_by: rule_id | manual
 }
@@ -111,6 +120,10 @@ TokenUsage {
 ```
 
 v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / session 级聚合在 query 层做。映射规则、跨厂商抽象、为何不做费用详见 ADR 0002。
+
+新增 EventKind（v0.6）的 payload shape **不在 §7 内联全文**——三者均比 TokenUsage 复杂，且 schema 演进路径已写在各自 ADR 的 D 段。SPEC 只承载 enum 与 §5 一句话定义，详细 shape 引用 ADR 0003 / 0004 / 0005。
+
+`code_change` 事件预留新字段 `contributor_mix`（按 hunk 的 author 归因），首版不发射，等 IDE 插件层（M4+）。详见 ADR 0004 D4。
 
 ## 8. 系统架构
 
@@ -169,6 +182,9 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
   - cursor 持久化到 `~/.agent-lens/cursors/<sid>.offset`，仅在 transport 成功后推进
 - 通过 `~/.claude/settings.json` 注册 hook，单一 `agent-lens-hook` 二进制按子命令分发。
 - 可选 MCP server，把 Lens 查询能力反哺给 Agent。
+- **配置快照**（SessionStart + 配置漂移）：每次 SessionStart 起一条 `agent_config_snapshot` 事件，bundle 内容走 artifact store。`UserPromptSubmit` / `PreToolUse` 时若指令文件 / settings hash 漂移，补发新快照。`hook_binary_sha256` 在 SessionStart 算一次，与 bundle 同事件入 hash chain，作为 capture-time attestation。详见 ADR 0003。
+- **人工干预**（PreToolUse 派生 + Stop 启发式 + GitHub webhook 派生）：`PreToolUse` permission decision 派生 `human_intervention.permission_decision`（与 tool_call 共存，via `target_event_id` 链回）；`Stop` 时按 `stop_reason == null` 且无后续 tool_result 启发式推断 `interrupt`；GitHub `pull_request_review` handler 派生 `review_decision`，merge 事件回扫 request_changes 状态派生 `merge_override`。详见 ADR 0004 D2 / D3 / D5。
+- **上下文变换**（transcript 解析 + PostToolUse 截断检测）：transcript 解析新增识别 compaction（降级为启发式）、system reminder 注入（以 hash 去重发首次）；PostToolUse 检测 tool_result 截断占位符并发 `context_transform.truncation`。详见 ADR 0005 D3 / D4 / D5。
 
 **Thinking 捕获条件**：仅当 Claude Code 在该轮启用了 extended thinking，transcript 中才会有 `thinking` block 可读。本路径不主动开启该选项，也不强制其存在。
 
@@ -178,6 +194,9 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 - Claude Code transcript jsonl 不是公开稳定契约，解析按 fail-soft：未识别行跳过，不中断流。最低支持版本随发版迭代标注于 README。
 - `<synthetic>` 模型标记的消息（Claude Code 自身注入的 stop-sequence 占位，usage 全 0）按已知形态跳过 usage 提取，不报错、不丢消息体。
 - **思考内容（thinking 文本）**：Claude Code 写 transcript 时只保留 `signature` 字段，**原文不持久化**。§10.1 拿不到原文。每条 assistant 消息中被丢弃的 thinking 块**数量**显式记录在派生 DECISION 事件的 `payload.thinking_redacted_by_claude_code`，避免审计报告把"被吞"误读为"无思考"。要拿原文得走 §10.4。
+- **工具空间与采样参数**：本轮可用工具集合（active MCP server、tool catalog）、permission mode 即时值、thinking budget、temperature 等 model_params 在 hook 路径不可得。`agent_config_snapshot` 事件中这两块字段标 `null` 并在 metadata 列入 `unknown_fields`，审计端能区分"工具空间为空" vs "采集路径看不到"。要拿到这些得走 §10.4。详见 ADR 0003 D4。
+- **Compaction 边界**：harness 自动 compaction 在 transcript 里是否显式标记**未经系统验证**，首版按 token-budget 启发式推断，生成 `context_transform.compaction` 事件并置 `loss_hint.confidence = "inferred"`。验证通过则 confidence 升到 `observed`；Truncation 与 system reminder 注入在 transcript 中可见，直接观测。详见 ADR 0005 D5。
+- **手工编辑归因**：agent 改完代码 → 人手在 IDE 微调 → commit 这条混合贡献路径，在 §10.1 路径不可还原。`HumanIntervention.manual_edit` 与 `code_change.contributor_mix` 字段位预留，等 IDE 插件层（M4+）。详见 ADR 0004 D4。
 - 仍**没有**的能力：实时拦截 / token 流式即时反馈 / policy gate。要这些得走 §10.4。
 - **Sub-agent 派发**（Agent 工具）：父侧 tool_call/result 完整捕获（含 `response.agentId` 等元数据，UI 显式 surface）。子 session 在 user-global hook 装好（`agent-lens-hook setup --personal`）的前提下以独立 UUID session 捕获；父→子的自动 `delegates` link 留 v0.2，详见 ADR 0008 与追踪 issue #85。Audit reader 在 v0.1 通过 timestamp + prompt 文本人眼对应。
 
@@ -262,6 +281,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 | R5 | 与现有 OpenTelemetry-GenAI / Langfuse 等观测系统的关系：互补还是重叠？ |
 | R6 | attestation 的密钥管理：自托管下用本地 KMS 还是 Sigstore（需外网）？ |
 | R7 | 跨厂商 TokenUsage 可比性：OpenCode / Cursor / 自研 Agent 的 usage schema 不一致——尤其 cache 语义(Anthropic 是 TTL 分桶 + 写入按倍率,OpenAI 是缓存输入打折)无法用同一字段名表达。SDK 层定义最小公约数 `TokenUsage`(input / output 通用,cache 字段按需扩展),vendor 字段保留出处,聚合时按 vendor 分组而非强行求和。详见 ADR 0002 D2。 |
+| R8 | Compaction 与部分 context 变换在 §10.1 hook 路径仅能启发式探测，精确建模等 §10.4 代理深模式或 IDE 插件层。事件载体（`context_transform`）已就位，`loss_hint.confidence = inferred / observed` 标记区分，审计端不会被静默漏报。详见 ADR 0005 D5。 |
 
 ---
 
@@ -353,7 +373,16 @@ agent-lens/
 - 历史会话取舍：v1 自观测从启动日起算，不回填激活前的会话。
 - Redaction 规则按 §12 默认策略走，不因 dogfood 放宽——thinking 文本尤其敏感，redaction 必须在 hook 出口处完成，不依赖 server。
 - 在 Lens UI 上把"Agent Lens 自身"作为一个 project 单独建模，避免与未来其他被观测项目混淆。
+- **配置 bundle 准备**（ADR 0003 配套）：本仓库的 `~/.claude/settings.json` / `<repo>/.claude/settings.local.json` 在 dogfood 激活前过一次脱敏审查——D6 redaction 是兜底，但人工预审能避开"开发期临时塞了 token"这种事故。
 
-**已具备的捕获深度**（截至 v0.5）：§10.1 的 hook 直采 + transcript 旁路使得激活后能拿到 prompt / 工具调用 / 工具结果 / thinking（启用 extended thinking 时）/ assistant 文本回复 / turn 边界 / **每条 assistant 消息的 token 用量与 stop_reason**（含 cache 5m/1h 分桶、server_tool_use 计数、service_tier、model）。仍要等 §10.4 代理深模式才能拿到的能力：实时拦截、流式 token 即时反馈、policy gate。
+**已具备的捕获深度**（截至 v0.6）：§10.1 的 hook 直采 + transcript 旁路使得激活后能拿到 prompt / 工具调用 / 工具结果 / thinking（启用 extended thinking 时）/ assistant 文本回复 / turn 边界 / **每条 assistant 消息的 token 用量与 stop_reason**（含 cache 5m/1h 分桶、server_tool_use 计数、service_tier、model）。
+
+经 ADR 0003 / 0004 / 0005 接受后，本路径还能捕获：
+
+- **决策时配置快照**：指令栈合并 hash、settings 与 hook 注册、采集器二进制 hash（capture-time attestation），按 SessionStart + 配置漂移触发（ADR 0003）。dogfood 期 SPEC.md / CLAUDE.md / hook 高频修改时，timeline 上能看到每次配置漂移点。
+- **人工干预事件**：permission 决策（allow / allow_always / deny / edit）、ESC 打断（启发式）、PR review_decision、merge_override、permissions 黑白名单变更（ADR 0004）。
+- **上下文变换**：compaction（启发式 inferred）、tool_result truncation、system reminder 注入（ADR 0005）。
+
+仍要等 §10.4 代理深模式才能拿到的能力：实时拦截、流式 token 即时反馈、policy gate、精确 compaction 边界、本轮工具空间快照、模型采样参数。
 
 **反馈回路**：dogfood 暴露的可用性问题以 issue 入仓，作为 M4+ 优先级输入。
