@@ -30,6 +30,42 @@ These were settled during initial scoping and are referenced throughout `SPEC.md
 - Architecture decisions live in `docs/ADR/` (see `docs/ADR/README.md` for the SPEC vs ADR vs Patch mechanism). Accepted ADRs are append-only — propose a new ADR rather than editing one in place. Non-trivial design choices (new EventKind, schema change, irreversible tech selection) should land as a draft ADR before code.
 - Common commands are wired in the `Makefile`: `make build`, `make build-prod` (with embedded UI), `make proto`, `make gqlgen`, `make test`, `make test-integration`, `make compose-up`, `make web-dev`, `make web-build`, `make embed-webui`. `make help` lists them all. (`make migrate-up` still exists but is legacy — server self-migrates on startup unless `AGENT_LENS_SKIP_MIGRATE=1`.)
 
+## Repository layout & branching
+
+The checkout is a **bare-repo worktree container**, not a normal clone:
+
+```
+agent-lens/
+├── .bare/    # bare git dir — the shared object store
+├── .git      # file: "gitdir: ./.bare"
+├── main/     # permanent worktree, always on `main`
+└── <task>/   # one short-lived worktree per in-flight task
+```
+
+**Branching is trunk-based.** `main` is the single trunk and is always
+releasable — there is no long-lived `develop` branch.
+
+- **One task = one branch = one worktree = one PR.** Cut a short-lived branch
+  off `origin/main`, work in its own worktree, open a PR, squash-merge to
+  `main`, then delete the branch + worktree. Run tasks in parallel by having
+  several worktrees checked out at once — never by stashing or long-lived
+  branches.
+- Branch names: `feat/…`, `fix/…`, `refactor/…`, `docs/…`, `chore/…`. The
+  worktree directory mirrors the branch (`feat/x` → `feat-x/`).
+- `main/` is never developed in — it is for releases, tagging, reading
+  `SPEC.md` / ADRs, and hosting the dogfood stack (`deploy/compose/.data`).
+- Never run `git` / `make` / `go` at the container root — it is bare; `cd`
+  into a worktree first.
+
+**Keeping parallel work safe:**
+
+- Branches stay short-lived (merge within a day or two) and small.
+- Rebase on `origin/main` before opening a PR so parallel branches don't drift.
+- Split refactors into small, independently-mergeable steps — no weeks-long
+  refactor branch; it would conflict with every other in-flight stream.
+- After a squash-merge, delete the local branch with `git branch -D` (`-d`
+  refuses because squash leaves the branch looking unmerged).
+
 ## Self-review before merge
 
 **Run `/self-review` before submitting any self-review summary or merging a PR.** The skill (in `.claude/skills/self-review/SKILL.md`) runs the mechanical pass automatically (git staging hygiene, codegen drift, tests, typecheck, debug-marker scan, Dockerfile build, actionlint, release.yml dry-run, RELEASE_NOTES quantitative-claim cross-check), walks the judgment-pass prompts, recommends `/review` or `/ultrareview` escalation when the PR warrants it, and ends with an explicit "what this review didn't cover" disclaimer.
