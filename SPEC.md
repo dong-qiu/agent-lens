@@ -282,6 +282,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 | R6 | attestation 的密钥管理：自托管下用本地 KMS 还是 Sigstore（需外网）？ |
 | R7 | 跨厂商 TokenUsage 可比性：OpenCode / Cursor / 自研 Agent 的 usage schema 不一致——尤其 cache 语义(Anthropic 是 TTL 分桶 + 写入按倍率,OpenAI 是缓存输入打折)无法用同一字段名表达。SDK 层定义最小公约数 `TokenUsage`(input / output 通用,cache 字段按需扩展),vendor 字段保留出处,聚合时按 vendor 分组而非强行求和。详见 ADR 0002 D2。 |
 | R8 | Compaction 与部分 context 变换在 §10.1 hook 路径仅能启发式探测，精确建模等 §10.4 代理深模式或 IDE 插件层。事件载体（`context_transform`）已就位，`loss_hint.confidence = inferred / observed` 标记区分，审计端不会被静默漏报。详见 ADR 0005 D5。 |
+| R9 | 「某 skill 的指令正文是否进入了某一轮 context」无法从 §10.1 hook 路径验证——hook 不暴露 system prompt / context 窗口，Claude Code 也没有 skill-load hook。可得的只有两个间接信号：skill 文件在磁盘上的存在性（ADR 0003 `agent_config_snapshot` config bundle 快照）与 skill 被**调用**（`Skill` 工具的 PreToolUse / PostToolUse，见 issue #101）。精确的「context 此刻含 skill X 指令」断言等 §10.4 代理深模式。审计端据此把 skill **可用性** 与 skill **调用** 分别建模，不假装能证明 context 成分。 |
 
 ---
 
