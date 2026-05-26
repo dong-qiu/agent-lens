@@ -93,8 +93,9 @@ claude --worktree feat/token-budget   # new worktree, branched off origin/main
 terminals, or `/resume` within a session (`Ctrl+W` widens the picker to all
 worktrees). Keep branches short-lived (merge within a day or two) and small.
 
-> The old `wt-new` / `wt-rm` shell helpers are **retired** in favor of native
-> `--worktree`. If you still see them sourced, they're legacy.
+> The `~/.zshrc` "agent-lens worktree helpers" block (`wt-start` / `wt-finish` /
+> `wt-list`, the 5-fixed-worktree model) is **retired** in favor of native
+> `--worktree`. Delete that block from your shell config.
 
 ## Self-review before merge
 
