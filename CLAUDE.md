@@ -38,39 +38,60 @@ The checkout is a **bare-repo worktree container**, not a normal clone:
 agent-lens/
 ├── .bare/    # bare git dir — the shared object store
 ├── .git      # file: "gitdir: ./.bare"
-├── main/     # permanent worktree, always on `main`
-└── <task>/   # one short-lived worktree per in-flight task
+├── main/     # permanent worktree, always on `main` — launch Claude from here
+└── …/        # per-task worktrees, created by `claude --worktree`
 ```
 
 **Branching is trunk-based.** `main` is the single trunk and is always
-releasable — there is no long-lived `develop` branch.
+releasable — there is no long-lived `develop` branch. **One task = one
+worktree = one branch = one PR.**
 
-- **One task = one branch = one worktree = one PR.** Cut a short-lived branch
-  off `origin/main`, work in its own worktree, open a PR, squash-merge to
-  `main`, then delete the branch + worktree. Run tasks in parallel by having
-  several worktrees checked out at once — never by stashing or long-lived
-  branches.
-- Branch names: `feat/…`, `fix/…`, `refactor/…`, `docs/…`, `chore/…`. The
-  worktree directory mirrors the branch (`feat/x` → `feat-x/`).
+**Use Claude Code's native worktrees** — one task per worktree session. Don't
+develop in `main/`, and don't hand-roll worktrees.
+
+```bash
+# launch Claude from main/ (NOT the bare container root), then:
+claude --worktree feat/token-budget   # new worktree, branched off origin/main
+```
+
+- **Branch naming.** Native worktrees prefix the branch with `worktree-`, so
+  `--worktree feat/token-budget` → branch `worktree-feat/token-budget` (the
+  `feat/ fix/ docs/ chore/ refactor/` segment survives — keep using it for
+  semantics; the `worktree-` prefix is unavoidable without a `WorktreeCreate`
+  hook, which we deliberately don't run). The worktree dir lives under
+  `.claude/worktrees/` (already gitignored).
+- **Base ref + shared deps** (set in `.claude/settings*.json`, see
+  `settings.example.json`): `worktree.baseRef: "fresh"` branches every worktree
+  off `origin/<default>` so there's no stale base; `worktree.symlinkDirectories:
+  ["web/node_modules"]` symlinks frontend deps in (no re-install, no disk bloat).
+- **First run.** `--worktree` requires workspace trust — run plain `claude` once
+  in `main/` and accept the prompt before the flag works.
 - `main/` is never developed in — it is for releases, tagging, reading
   `SPEC.md` / ADRs, and hosting the dogfood stack (`deploy/compose/.data`).
-- Never run `git` / `make` / `go` at the container root — it is bare; `cd`
-  into a worktree first.
+- Never run `git` / `make` / `go` at the bare container root; work inside a
+  worktree.
 
-**Keeping parallel work safe:**
+**Daily loop** (conversational, inside the worktree session):
 
-- Branches stay short-lived (merge within a day or two) and small.
-- Rebase on `origin/main` before opening a PR so parallel branches don't drift.
-- Split refactors into small, independently-mergeable steps — no weeks-long
-  refactor branch; it would conflict with every other in-flight stream.
-- After a squash-merge, delete the local branch with `git branch -D` (`-d`
-  refuses because squash leaves the branch looking unmerged).
-- Merge with `gh pr merge <n> --squash` — **without** `--delete-branch`. In
-  this layout gh's post-merge local cleanup tries to check out / delete the
-  branch and aborts with a misleading `fatal: 'main' is already used by
-  worktree …`; the remote merge has *already* succeeded, so do not re-run or
-  assume failure. Then fast-forward `main/` (`git -C main pull --ff-only`) and
-  remove the branch + worktree yourself (`wt-rm <branch>`).
+1. Work, commit, push, open a PR (`gh pr create` — the session links to it).
+2. `/self-review` before merge.
+3. **Merge with `gh pr merge <n> --squash` — *without* `--delete-branch`.** In
+   this bare-container layout gh's post-merge local cleanup tries to check out /
+   delete the branch and aborts with a misleading
+   `fatal: '…' is already used by worktree …`; the remote merge has *already*
+   succeeded, so don't re-run or assume failure.
+4. Sync the trunk: `git -C main pull --ff-only`.
+5. Clean up: on exit, answer **keep** while the PR is in review (the worktree
+   survives; `claude --resume <name>` returns to it). After merge,
+   `git worktree remove <path>` + `git branch -D <branch>` +
+   `git push origin --delete <branch>`.
+
+**Parallel work.** Run multiple `claude --worktree` sessions in separate
+terminals, or `/resume` within a session (`Ctrl+W` widens the picker to all
+worktrees). Keep branches short-lived (merge within a day or two) and small.
+
+> The old `wt-new` / `wt-rm` shell helpers are **retired** in favor of native
+> `--worktree`. If you still see them sourced, they're legacy.
 
 ## Self-review before merge
 

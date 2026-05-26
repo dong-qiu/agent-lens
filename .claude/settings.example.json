@@ -40,5 +40,9 @@
         ]
       }
     ]
+  },
+  "worktree": {
+    "baseRef": "fresh",
+    "symlinkDirectories": ["web/node_modules"]
   }
 }
