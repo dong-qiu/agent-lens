@@ -65,6 +65,12 @@ releasable — there is no long-lived `develop` branch.
   refactor branch; it would conflict with every other in-flight stream.
 - After a squash-merge, delete the local branch with `git branch -D` (`-d`
   refuses because squash leaves the branch looking unmerged).
+- Merge with `gh pr merge <n> --squash` — **without** `--delete-branch`. In
+  this layout gh's post-merge local cleanup tries to check out / delete the
+  branch and aborts with a misleading `fatal: 'main' is already used by
+  worktree …`; the remote merge has *already* succeeded, so do not re-run or
+  assume failure. Then fast-forward `main/` (`git -C main pull --ff-only`) and
+  remove the branch + worktree yourself (`wt-rm <branch>`).
 
 ## Self-review before merge
 
