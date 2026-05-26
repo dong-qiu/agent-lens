@@ -25,6 +25,19 @@ import (
 	githubwh "github.com/dong-qiu/agent-lens/internal/webhooks/github"
 )
 
+// registerHealthz wires the liveness probe for both GET and HEAD. HEAD
+// support matters for uptime checkers / load balancers that probe with
+// HEAD (issue #99): chi's r.Get matches GET only, so HEAD fell through to
+// the catch-all UI handler and 404'd. The handler only sets the status —
+// net/http suppresses the body for HEAD responses automatically.
+func registerHealthz(r chi.Router) {
+	h := func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	r.Get("/healthz", h)
+	r.Head("/healthz", h)
+}
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
@@ -79,9 +92,7 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 
-	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	registerHealthz(r)
 
 	token := os.Getenv("AGENT_LENS_TOKEN")
 	if token == "" {
