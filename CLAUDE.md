@@ -39,7 +39,7 @@ agent-lens/
 ├── .bare/    # bare git dir — the shared object store
 ├── .git      # file: "gitdir: ./.bare"
 ├── main/     # permanent worktree, always on `main` — launch Claude from here
-└── …/        # per-task worktrees, created by `claude --worktree`
+└── .claude/worktrees/<name>/   # per-task worktrees (created by `claude --worktree`)
 ```
 
 **Branching is trunk-based.** `main` is the single trunk and is always
@@ -54,12 +54,15 @@ develop in `main/`, and don't hand-roll worktrees.
 claude --worktree feat/token-budget   # new worktree, branched off origin/main
 ```
 
-- **Branch naming.** Native worktrees prefix the branch with `worktree-`, so
-  `--worktree feat/token-budget` → branch `worktree-feat/token-budget` (the
-  `feat/ fix/ docs/ chore/ refactor/` segment survives — keep using it for
-  semantics; the `worktree-` prefix is unavoidable without a `WorktreeCreate`
-  hook, which we deliberately don't run). The worktree dir lives under
-  `.claude/worktrees/` (already gitignored).
+- **Branch + dir naming** (verified): `--worktree feat/token-budget` creates
+  branch `worktree-feat+token-budget` and dir
+  `<container>/.claude/worktrees/feat+token-budget/` — Claude prefixes
+  `worktree-` and rewrites `/` → `+` in both. The `feat`/`fix`/`docs` segment
+  still rides along (as `feat+…`), so keep naming worktrees with it for
+  semantics; the `worktree-` prefix and `+` substitution are unavoidable without
+  a `WorktreeCreate` hook, which we deliberately don't run. Worktrees always land
+  under the **container-root** `.claude/worktrees/`, regardless of which worktree
+  you launch from.
 - **Base ref + shared deps** (set in `.claude/settings*.json`, see
   `settings.example.json`): `worktree.baseRef: "fresh"` branches every worktree
   off `origin/<default>` so there's no stale base; `worktree.symlinkDirectories:
