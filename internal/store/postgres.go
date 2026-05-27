@@ -29,6 +29,12 @@ func OpenPostgres(ctx context.Context, dsn string) (*Postgres, error) {
 	return &Postgres{pool: pool}, nil
 }
 
+// Ping round-trips the connection pool so /healthz reflects real DB
+// reachability rather than an unconditional 200 (issue #10).
+func (p *Postgres) Ping(ctx context.Context) error {
+	return p.pool.Ping(ctx)
+}
+
 func (p *Postgres) Close() error {
 	p.pool.Close()
 	return nil
