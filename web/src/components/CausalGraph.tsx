@@ -132,8 +132,13 @@ function nodeSummary(event: Event): string {
   const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
   switch (event.kind) {
     case "TOOL_CALL":
-    case "TOOL_RESULT":
+    case "TOOL_RESULT": {
+      const skill = p.skill as Record<string, unknown> | undefined;
+      if (skill && typeof skill.name === "string") {
+        return clip(`skill: ${skill.name}`, 24);
+      }
       return asStr(p.name);
+    }
     case "PROMPT":
     case "THOUGHT":
       return clip(asStr(p.text).replace(/\s+/g, " ").trim(), 24);

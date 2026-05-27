@@ -57,6 +57,18 @@ export function EventCard({ event }: { event: Event }) {
               </span>
             )}
             {(() => {
+              const skill = skillInfo(event);
+              return skill ? (
+                <span
+                  className="inline-flex items-center gap-0.5 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-900 ring-1 ring-violet-300"
+                  title={`Skill invocation: ${skill.name}${skill.args ? ` ${skill.args}` : ""}`}
+                >
+                  <span>⌘</span>
+                  <span>skill</span>
+                </span>
+              ) : null;
+            })()}
+            {(() => {
               const badge = authorizationBadge(event);
               return badge ? (
                 <span
@@ -178,6 +190,17 @@ export function EventCard({ event }: { event: Event }) {
   );
 }
 
+// skillInfo extracts the issue #101 skill discriminator from a TOOL_CALL.
+// Returns null for any other event, so the violet "skill" chip renders only
+// on actual skill invocations.
+function skillInfo(event: Event): { name: string; args: string } | null {
+  if (event.kind !== "TOOL_CALL") return null;
+  const p = (event.payload ?? {}) as Record<string, unknown>;
+  const skill = p.skill as Record<string, unknown> | undefined;
+  if (!skill || typeof skill.name !== "string") return null;
+  return { name: skill.name, args: typeof skill.args === "string" ? skill.args : "" };
+}
+
 function summarize(event: Event): string {
   const p = (event.payload ?? {}) as Record<string, unknown>;
   switch (event.kind) {
@@ -185,8 +208,14 @@ function summarize(event: Event): string {
     case "THOUGHT":
       return clip(asString(p.text));
     case "TOOL_CALL":
-    case "TOOL_RESULT":
+    case "TOOL_RESULT": {
+      const skill = p.skill as Record<string, unknown> | undefined;
+      if (skill && typeof skill.name === "string") {
+        const args = asString(skill.args);
+        return args ? `${skill.name} · ${clip(args)}` : skill.name;
+      }
       return asString(p.name);
+    }
     case "COMMIT": {
       const sha = asString(p.sha).slice(0, 7);
       const subject = asString(p.subject);

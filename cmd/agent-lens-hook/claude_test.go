@@ -70,6 +70,75 @@ func TestBuildEventsPreToolUse(t *testing.T) {
 	}
 }
 
+func TestBuildEventsSkillInvocation(t *testing.T) {
+	evs, _ := buildEvents(&claudeHookInput{
+		HookEventName: "PreToolUse",
+		SessionID:     "s1",
+		ToolName:      "Skill",
+		ToolInput:     json.RawMessage(`{"skill":"review","args":"100"}`),
+	})
+	if len(evs) != 1 || evs[0]["kind"] != "tool_call" {
+		t.Fatalf("got %+v, want one tool_call event", evs)
+	}
+	payload, ok := evs[0]["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload not a map: %T", evs[0]["payload"])
+	}
+	skill, ok := payload["skill"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload.skill missing or not a map: %+v", payload)
+	}
+	if skill["name"] != "review" {
+		t.Errorf("skill.name = %v, want review", skill["name"])
+	}
+	if skill["args"] != "100" {
+		t.Errorf("skill.args = %v, want 100", skill["args"])
+	}
+}
+
+func TestSkillDiscriminatorOnlyForSkillTool(t *testing.T) {
+	// A non-Skill tool must never get a skill discriminator, even if its
+	// input happens to contain a "skill" key.
+	evs, _ := buildEvents(&claudeHookInput{
+		HookEventName: "PreToolUse",
+		SessionID:     "s1",
+		ToolName:      "Edit",
+		ToolInput:     json.RawMessage(`{"skill":"sneaky"}`),
+	})
+	payload := evs[0]["payload"].(map[string]any)
+	if _, present := payload["skill"]; present {
+		t.Errorf("non-Skill tool got a skill discriminator: %+v", payload)
+	}
+}
+
+func TestSkillInvocationArgless(t *testing.T) {
+	got := skillInvocation("Skill", json.RawMessage(`{"skill":"self-review"}`))
+	if got == nil || got["name"] != "self-review" {
+		t.Fatalf("got %+v, want name=self-review", got)
+	}
+	if _, hasArgs := got["args"]; hasArgs {
+		t.Errorf("args present for an argless skill: %+v", got)
+	}
+}
+
+func TestSkillInvocationFailSoft(t *testing.T) {
+	cases := []struct {
+		name, tool, input string
+	}{
+		{"non-skill tool", "Bash", `{"skill":"x"}`},
+		{"empty skill name", "Skill", `{"args":"100"}`},
+		{"unparseable input", "Skill", `not json`},
+		{"empty input", "Skill", ``},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := skillInvocation(tc.tool, json.RawMessage(tc.input)); got != nil {
+				t.Errorf("skillInvocation(%q, %q) = %+v, want nil", tc.tool, tc.input, got)
+			}
+		})
+	}
+}
+
 func TestBuildEventsPostToolUse(t *testing.T) {
 	evs, _ := buildEvents(&claudeHookInput{
 		HookEventName: "PostToolUse",
