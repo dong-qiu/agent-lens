@@ -136,7 +136,40 @@ func makeToolCall(in *claudeHookInput) map[string]any {
 		}
 	}
 	payload["authorization"] = auth
+	if skill := skillInvocation(in.ToolName, in.ToolInput); skill != nil {
+		payload["skill"] = skill
+	}
 	return baseEvent(in, agentActor(), "tool_call", payload)
+}
+
+// skillInvocation extracts a normalized skill discriminator from a Skill
+// tool_call's input. Returns nil for non-Skill tools or unparseable input
+// (fail-soft: a missing discriminator just leaves a plain tool_call). This is
+// gap 1 of issue #101 — a queryable marker that "a skill ran" and which one,
+// without downstream having to special-case the Skill tool's input shape.
+//
+// Deliberately neutral: it records name+args only, not whether the skill was
+// human-typed (/cmd) vs model-invoked — the hook can't tell them apart, and
+// the "human-initiated workflow" semantics are the open design question #101
+// leaves for a possible human_intervention sub_kind (ADR 0004). The injected
+// instruction *body* (gap 2) isn't reachable here — the PostToolUse response
+// carries only {success, commandName}; tracked in #110.
+func skillInvocation(toolName string, toolInput json.RawMessage) map[string]any {
+	if toolName != "Skill" {
+		return nil
+	}
+	var s struct {
+		Skill string `json:"skill"`
+		Args  string `json:"args"`
+	}
+	if err := json.Unmarshal(toolInput, &s); err != nil || s.Skill == "" {
+		return nil
+	}
+	out := map[string]any{"name": s.Skill}
+	if s.Args != "" {
+		out["args"] = s.Args
+	}
+	return out
 }
 
 // detectRiskSignalsOrEmpty wraps detectRiskSignals so the authorization
