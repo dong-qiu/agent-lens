@@ -112,6 +112,10 @@ make web-build         # TS 类型检查 + Vite 打包
 - `AGENT_LENS_GH_WEBHOOK_SECRET`：GitHub webhook 共享密钥；空则 `/webhooks/github` 返 503。设置后 server 用 HMAC-SHA256 校验 `X-Hub-Signature-256`
 - `AGENT_LENS_DEPLOY_WEBHOOK_TOKEN`：deploy webhook 独立 bearer token（与 `AGENT_LENS_TOKEN` 分离）；空则 `/webhooks/deploy` 返 503
 
+**可观测性端点（根路径，无需 auth）**
+- `/metrics`：Prometheus 格式。自有指标 `agent_lens_events_ingested_total{kind}`、`agent_lens_ingest_failures_total{reason}`、`agent_lens_session_head_cache_size`、`agent_lens_graphql_request_duration_seconds`，外加 client_golang 默认的 Go runtime / process collectors（#4）。挂在 `/v1` 之外，scraper 不需要 API token。
+- `/healthz`（GET + HEAD）：ping 后端 store；store 不可达返 503，可达返 200（#10）。
+
 **Hook (`agent-lens-hook`)**
 - `AGENT_LENS_URL`（默认 `http://localhost:8787`）
 - `AGENT_LENS_TOKEN`（同 server，作为 bearer token 发送）

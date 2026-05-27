@@ -8,6 +8,7 @@ import (
 	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/dong-qiu/agent-lens/internal/metrics"
 	"github.com/dong-qiu/agent-lens/internal/store"
 )
 
@@ -18,7 +19,7 @@ import (
 // introspection by default.
 func RegisterRoutes(r chi.Router, s store.Store) {
 	srv := handler.NewDefaultServer(NewExecutableSchema(Config{Resolvers: NewResolver(s)}))
-	r.Handle("/graphql", srv)
+	r.Handle("/graphql", metrics.TimeGraphQL(srv))
 	if os.Getenv("AGENT_LENS_PLAYGROUND") == "true" {
 		r.Handle("/playground", playground.Handler("Agent Lens", "/v1/graphql"))
 	}
