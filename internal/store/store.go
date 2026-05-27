@@ -88,6 +88,12 @@ type Store interface {
 	UsageEventsBySessions(ctx context.Context, ids []string) (map[string][]*Event, error)
 	AppendLink(ctx context.Context, l *Link) error
 	LinksForEvent(ctx context.Context, eventID string) ([]*Link, error)
+	// LinksForEvents is the batched form of LinksForEvent: for each id it
+	// returns the links touching it (from_event == id OR to_event == id), in
+	// a single query, so a GraphQL DataLoader can fold N per-event link
+	// lookups into one round trip (issue #20). Ids with no links are absent
+	// from the map.
+	LinksForEvents(ctx context.Context, ids []string) (map[string][]*Link, error)
 	// LinksForSession returns every link with at least one endpoint
 	// in sessionID. Used by BFS-style queries that need to discover
 	// neighbouring sessions without paging through all events first

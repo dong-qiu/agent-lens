@@ -483,3 +483,59 @@ func TestPostgresUsageEventsBySessions(t *testing.T) {
 		t.Errorf("empty ids: got %v (err %v), want empty map and no query", empty, err)
 	}
 }
+
+// TestPostgresLinksForEvents validates the issue #20 batched query against a
+// real Postgres: the `= ANY($1) OR = ANY($1)` filter groups each link under
+// every requested endpoint it touches, agrees with LinksForEvent, and skips
+// absent ids.
+func TestPostgresLinksForEvents(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := openPostgresWithSchema(ctx, t)
+	defer cleanup()
+
+	now := time.Now().UTC()
+	for _, e := range []*Event{
+		{ID: "01LE1", TS: now, SessionID: "s1", ActorType: "human", ActorID: "a", Kind: "commit", Hash: "h1"},
+		{ID: "01LE2", TS: now.Add(time.Second), SessionID: "s1", ActorType: "human", ActorID: "a", Kind: "pr", Hash: "h2", PrevHash: "h1"},
+		{ID: "01LE3", TS: now.Add(2 * time.Second), SessionID: "s1", ActorType: "human", ActorID: "a", Kind: "push", Hash: "h3", PrevHash: "h2"},
+	} {
+		if err := st.AppendEvent(ctx, e); err != nil {
+			t.Fatalf("append %s: %v", e.ID, err)
+		}
+	}
+	for _, l := range []*Link{
+		{FromEvent: "01LE1", ToEvent: "01LE2", Relation: "references", Confidence: 1, InferredBy: "t"},
+		{FromEvent: "01LE2", ToEvent: "01LE3", Relation: "produces", Confidence: 1, InferredBy: "t"},
+	} {
+		if err := st.AppendLink(ctx, l); err != nil {
+			t.Fatalf("append link: %v", err)
+		}
+	}
+
+	got, err := st.LinksForEvents(ctx, []string{"01LE1", "01LE2", "01LE-absent"})
+	if err != nil {
+		t.Fatalf("LinksForEvents: %v", err)
+	}
+	if len(got["01LE1"]) != 1 {
+		t.Errorf("01LE1 links = %d, want 1 (from-link only)", len(got["01LE1"]))
+	}
+	if len(got["01LE2"]) != 2 {
+		t.Errorf("01LE2 links = %d, want 2 (to-link from 01LE1 + from-link to 01LE3)", len(got["01LE2"]))
+	}
+	if _, ok := got["01LE-absent"]; ok {
+		t.Errorf("absent id must not appear in the map")
+	}
+
+	single, err := st.LinksForEvent(ctx, "01LE2")
+	if err != nil {
+		t.Fatalf("LinksForEvent: %v", err)
+	}
+	if len(single) != len(got["01LE2"]) {
+		t.Errorf("batched count %d != single-accessor count %d for 01LE2", len(got["01LE2"]), len(single))
+	}
+
+	empty, err := st.LinksForEvents(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Errorf("empty ids: got %v (err %v), want empty map", empty, err)
+	}
+}

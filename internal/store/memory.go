@@ -215,6 +215,30 @@ func (m *Memory) LinksForEvent(_ context.Context, eventID string) ([]*Link, erro
 	return out, nil
 }
 
+// LinksForEvents is the batched form of LinksForEvent (issue #20). Each link
+// is filed under whichever requested endpoint it touches; self-links file once.
+func (m *Memory) LinksForEvents(_ context.Context, ids []string) (map[string][]*Link, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	want := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		want[id] = struct{}{}
+	}
+	out := map[string][]*Link{}
+	for _, l := range m.links {
+		cp := l
+		if _, ok := want[l.FromEvent]; ok {
+			out[l.FromEvent] = append(out[l.FromEvent], &cp)
+		}
+		if l.ToEvent != l.FromEvent {
+			if _, ok := want[l.ToEvent]; ok {
+				out[l.ToEvent] = append(out[l.ToEvent], &cp)
+			}
+		}
+	}
+	return out, nil
+}
+
 func (m *Memory) LinksForSession(_ context.Context, sessionID string) ([]*Link, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

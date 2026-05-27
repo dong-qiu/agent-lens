@@ -19,7 +19,10 @@ import (
 // introspection by default.
 func RegisterRoutes(r chi.Router, s store.Store) {
 	srv := handler.NewDefaultServer(NewExecutableSchema(Config{Resolvers: NewResolver(s)}))
-	r.Handle("/graphql", metrics.TimeGraphQL(srv))
+	// LoaderMiddleware gives each request a fresh DataLoader so Event.links
+	// batches into one query instead of N (issue #20); TimeGraphQL wraps the
+	// whole thing for the latency histogram.
+	r.Handle("/graphql", metrics.TimeGraphQL(LoaderMiddleware(s, srv)))
 	if os.Getenv("AGENT_LENS_PLAYGROUND") == "true" {
 		r.Handle("/playground", playground.Handler("Agent Lens", "/v1/graphql"))
 	}
