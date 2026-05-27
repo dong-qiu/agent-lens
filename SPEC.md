@@ -174,7 +174,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 ### 10.1 Claude Code（首发）
 
 **事件捕获路径**：
-- **Hook 直采**（`SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop`）：覆盖 prompt、工具调用与结果、会话/turn 边界。事件由 `agent-lens-hook claude` 子命令解析 stdin 并 POST 到 Ingest；Ingest 不可达时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink，供日后 `agent-lens replay`。
+- **Hook 直采**（`SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop` / `SubagentStart` / `SubagentStop`）：覆盖 prompt、工具调用与结果、会话/turn 边界、sub-agent 生命周期。事件由 `agent-lens-hook claude` 子命令解析 stdin 并 POST 到 Ingest；Ingest 不可达时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink，供日后 `agent-lens replay`。
 - **Transcript 旁路**（`Stop` 触发时）：读取 hook payload 的 `transcript_path`，对自上次 cursor 起新增的 jsonl 行做增量解析，提取每个 assistant 消息的 `thinking` 与 `text` content block：
   - `thinking` block → `EVENT_KIND_THOUGHT`
   - `text` block → `EVENT_KIND_DECISION`，payload.marker = `assistant_message`
@@ -198,7 +198,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 - **Compaction 边界**：harness 自动 compaction 在 transcript 里是否显式标记**未经系统验证**，首版按 token-budget 启发式推断，生成 `context_transform.compaction` 事件并置 `loss_hint.confidence = "inferred"`。验证通过则 confidence 升到 `observed`；Truncation 与 system reminder 注入在 transcript 中可见，直接观测。详见 ADR 0005 D5。
 - **手工编辑归因**：agent 改完代码 → 人手在 IDE 微调 → commit 这条混合贡献路径，在 §10.1 路径不可还原。`HumanIntervention.manual_edit` 与 `code_change.contributor_mix` 字段位预留，等 IDE 插件层（M4+）。详见 ADR 0004 D4。
 - 仍**没有**的能力：实时拦截 / token 流式即时反馈 / policy gate。要这些得走 §10.4。
-- **Sub-agent 派发**（Agent 工具）：父侧 tool_call/result 完整捕获（含 `response.agentId` 等元数据，UI 显式 surface）。子 session 在 user-global hook 装好（`agent-lens-hook setup --personal`）的前提下以独立 UUID session 捕获；父→子的自动 `delegates` link 留 v0.2，详见 ADR 0008 与追踪 issue #85。Audit reader 在 v0.1 通过 timestamp + prompt 文本人眼对应。
+- **Sub-agent 派发**（Agent 工具）：父侧 tool_call/result 完整捕获（含 `response.agentId` 等元数据，UI 显式 surface）。子 session 在 user-global hook 装好（`agent-lens-hook setup --personal`）的前提下以独立 UUID session 捕获；`SubagentStart` / `SubagentStop` 生命周期事件以 `decision` marker 捕获，子侧带 `agent_id`，构成父→子桥接的子侧一半（预期与父侧 `tool_result.response.agentId` 配对——待 v0.2 实证）。自动 emit `delegates` link（含 `RELATION_DELEGATES` schema）仍留 v0.2，详见 ADR 0008 与追踪 issue #85。在此之前 audit reader 通过 timestamp + prompt 文本人眼对应。
 
 ### 10.4 代理深模式（M4+，未启用）
 

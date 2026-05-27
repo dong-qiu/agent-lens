@@ -66,6 +66,11 @@ var setupHookEvents = []string{
 	"PreToolUse",
 	"PostToolUse",
 	"Stop",
+	// Sub-agent (Task tool) lifecycle. SubagentStart fires in the child
+	// session and carries agent_id — the child-side half of the parent→child
+	// bridge the linker needs for the `delegates` link (issue #85).
+	"SubagentStart",
+	"SubagentStop",
 }
 
 func runSetup(args []string) {

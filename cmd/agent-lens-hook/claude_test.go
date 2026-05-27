@@ -151,6 +151,78 @@ func TestBuildEventsPostToolUse(t *testing.T) {
 	}
 }
 
+func TestBuildEventsSubagentStart(t *testing.T) {
+	evs, commit := buildEvents(&claudeHookInput{
+		HookEventName: "SubagentStart",
+		SessionID:     "child-uuid",
+		CWD:           "/repo",
+		AgentID:       "a06a387fa5403439d",
+		AgentType:     "Explore",
+	})
+	if commit != nil {
+		t.Errorf("SubagentStart should not return a commit fn")
+	}
+	if len(evs) != 1 || evs[0]["kind"] != "decision" {
+		t.Fatalf("got %+v, want one decision event", evs)
+	}
+	ev := evs[0]
+	// Attributed to the *child* session — the side that carries
+	// (session_id, agent_id) for the #85 parent→child bridge.
+	if ev["session_id"] != "child-uuid" {
+		t.Errorf("session_id = %v, want child-uuid", ev["session_id"])
+	}
+	if actor := ev["actor"].(map[string]any); actor["type"] != "system" {
+		t.Errorf("actor.type = %v, want system", actor["type"])
+	}
+	p := ev["payload"].(map[string]any)
+	if p["marker"] != "subagent_start" {
+		t.Errorf("marker = %v, want subagent_start", p["marker"])
+	}
+	if p["agent_id"] != "a06a387fa5403439d" {
+		t.Errorf("agent_id = %v, want a06a387fa5403439d", p["agent_id"])
+	}
+	if p["agent_type"] != "Explore" {
+		t.Errorf("agent_type = %v, want Explore", p["agent_type"])
+	}
+}
+
+func TestBuildEventsSubagentStop(t *testing.T) {
+	evs, _ := buildEvents(&claudeHookInput{
+		HookEventName: "SubagentStop",
+		SessionID:     "child-uuid",
+		AgentID:       "a06a387fa5403439d",
+	})
+	if len(evs) != 1 || evs[0]["kind"] != "decision" {
+		t.Fatalf("got %+v, want one decision event", evs)
+	}
+	p := evs[0]["payload"].(map[string]any)
+	if p["marker"] != "subagent_stop" {
+		t.Errorf("marker = %v, want subagent_stop", p["marker"])
+	}
+	if p["agent_id"] != "a06a387fa5403439d" {
+		t.Errorf("agent_id = %v, want a06a387fa5403439d", p["agent_id"])
+	}
+}
+
+func TestBuildEventsSubagentStartOmitsEmptyIDs(t *testing.T) {
+	// The lifecycle marker still emits without agent_id/agent_type (it has
+	// timeline value); the optional keys are simply omitted, not null.
+	evs, _ := buildEvents(&claudeHookInput{
+		HookEventName: "SubagentStart",
+		SessionID:     "child-uuid",
+	})
+	p := evs[0]["payload"].(map[string]any)
+	if p["marker"] != "subagent_start" {
+		t.Errorf("marker = %v, want subagent_start", p["marker"])
+	}
+	if _, ok := p["agent_id"]; ok {
+		t.Errorf("agent_id present despite empty input: %+v", p)
+	}
+	if _, ok := p["agent_type"]; ok {
+		t.Errorf("agent_type present despite empty input: %+v", p)
+	}
+}
+
 func TestBuildEventsUnknown(t *testing.T) {
 	evs, _ := buildEvents(&claudeHookInput{HookEventName: "Mystery", SessionID: "s1"})
 	if len(evs) != 0 {
