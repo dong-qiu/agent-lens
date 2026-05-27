@@ -116,6 +116,16 @@ func appendToSink(sessionID string, body []byte) error {
 		return fmt.Errorf("sink open: %w", err)
 	}
 	defer f.Close()
+
+	// Serialize concurrent writers (e.g. parallel sub-agents) so NDJSON
+	// records can't interleave on writes > PIPE_BUF — see lockSink / issue #3.
+	// Released before f.Close() (defers run LIFO).
+	unlock, err := lockSink(f.Fd())
+	if err != nil {
+		return fmt.Errorf("sink lock: %w", err)
+	}
+	defer unlock()
+
 	if _, err := f.Write(body); err != nil {
 		return fmt.Errorf("sink write: %w", err)
 	}
