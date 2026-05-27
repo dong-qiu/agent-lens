@@ -272,6 +272,46 @@ func (p *Postgres) LinksForEvent(ctx context.Context, eventID string) ([]*Link, 
 	return out, rows.Err()
 }
 
+// LinksForEvents batches LinksForEvent across many event ids in one query
+// (issue #20). Each link is filed under whichever of its endpoints were
+// requested, mirroring LinksForEvent's `from == id OR to == id` semantics.
+func (p *Postgres) LinksForEvents(ctx context.Context, ids []string) (map[string][]*Link, error) {
+	out := map[string][]*Link{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	const q = `SELECT from_event, to_event, relation, confidence, inferred_by
+		FROM links WHERE from_event = ANY($1) OR to_event = ANY($1)
+		ORDER BY relation, from_event, to_event`
+	rows, err := p.pool.Query(ctx, q, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	want := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		want[id] = struct{}{}
+	}
+	for rows.Next() {
+		var l Link
+		if err := rows.Scan(&l.FromEvent, &l.ToEvent, &l.Relation, &l.Confidence, &l.InferredBy); err != nil {
+			return nil, err
+		}
+		ll := l
+		if _, ok := want[l.FromEvent]; ok {
+			out[l.FromEvent] = append(out[l.FromEvent], &ll)
+		}
+		// Skip the to-bucket for a self-link so it isn't double-counted —
+		// matches the single OR-match LinksForEvent would return.
+		if l.ToEvent != l.FromEvent {
+			if _, ok := want[l.ToEvent]; ok {
+				out[l.ToEvent] = append(out[l.ToEvent], &ll)
+			}
+		}
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) LinksForSession(ctx context.Context, sessionID string) ([]*Link, error) {
 	const q = `SELECT from_event, to_event, relation, confidence, inferred_by
 		FROM links

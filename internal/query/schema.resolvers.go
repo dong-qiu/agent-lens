@@ -19,7 +19,19 @@ func (r *eventResolver) Links(ctx context.Context, obj *Event) ([]*Link, error) 
 	if obj == nil {
 		return nil, nil
 	}
-	raw, err := r.Store.LinksForEvent(ctx, obj.ID)
+	var (
+		raw []*store.Link
+		err error
+	)
+	if loaders := loadersFrom(ctx); loaders != nil {
+		// Batched path: every event's links field in one request folds into a
+		// single LinksForEvents query (issue #20).
+		raw, err = loaders.LinksByEvent.Load(ctx, obj.ID)()
+	} else {
+		// No LoaderMiddleware in this context (e.g. a resolver invoked
+		// directly in a test) — fall back to the unbatched lookup.
+		raw, err = r.Store.LinksForEvent(ctx, obj.ID)
+	}
 	if err != nil {
 		return nil, err
 	}

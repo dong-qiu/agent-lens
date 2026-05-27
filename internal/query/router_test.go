@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -727,5 +728,99 @@ func TestSessionsTotalUsageBatched(t *testing.T) {
 	}
 	if !seen["s1"] || !seen["s2"] {
 		t.Errorf("missing sessions in result: %+v", seen)
+	}
+}
+
+// linkBatchCounter wraps a memory store to count LinksForEvents dispatches —
+// the signal that the DataLoader batched (1) rather than N+1'd (issue #20).
+type linkBatchCounter struct {
+	*store.Memory
+	calls atomic.Int32
+}
+
+func (s *linkBatchCounter) LinksForEvents(ctx context.Context, ids []string) (map[string][]*store.Link, error) {
+	s.calls.Add(1)
+	return s.Memory.LinksForEvents(ctx, ids)
+}
+
+// TestEventLinksDataLoaderBatches is issue #20's acceptance test: a query
+// selecting `links` on N events must trigger ONE batched LinksForEvents query,
+// not N — and still attribute each link to both of its endpoints.
+func TestEventLinksDataLoaderBatches(t *testing.T) {
+	st := &linkBatchCounter{Memory: store.NewMemory()}
+	r := chi.NewRouter()
+	r.Route("/v1", func(sub chi.Router) {
+		ingest.RegisterRoutes(sub, st)
+		query.RegisterRoutes(sub, st)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	// Five events in one session with explicit ids so we can link two of them.
+	lines := make([]string, 0, 5)
+	for i := 0; i < 5; i++ {
+		lines = append(lines, fmt.Sprintf(
+			`{"id":"01EVT%d","session_id":"s1","actor":{"type":"agent","id":"c"},"kind":"tool_call","payload":{"name":"E%d"}}`, i, i))
+	}
+	resp, err := http.Post(srv.URL+"/v1/events", "application/x-ndjson", strings.NewReader(strings.Join(lines, "\n")))
+	if err != nil {
+		t.Fatalf("ingest post: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, want 200", resp.StatusCode)
+	}
+
+	if err := st.AppendLink(context.Background(), &store.Link{
+		FromEvent: "01EVT0", ToEvent: "01EVT1", Relation: "references", Confidence: 1, InferredBy: "test",
+	}); err != nil {
+		t.Fatalf("AppendLink: %v", err)
+	}
+
+	gqlBody := `{"query":"{ events(sessionId: \"s1\") { id links { fromEvent toEvent relation } } }"}`
+	resp, err = http.Post(srv.URL+"/v1/graphql", "application/json", strings.NewReader(gqlBody))
+	if err != nil {
+		t.Fatalf("graphql post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var got struct {
+		Data struct {
+			Events []struct {
+				ID    string `json:"id"`
+				Links []struct {
+					FromEvent string `json:"fromEvent"`
+					ToEvent   string `json:"toEvent"`
+					Relation  string `json:"relation"`
+				} `json:"links"`
+			} `json:"events"`
+		} `json:"data"`
+		Errors []map[string]any `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Errors) > 0 {
+		t.Fatalf("graphql errors: %+v", got.Errors)
+	}
+	if len(got.Data.Events) != 5 {
+		t.Fatalf("got %d events, want 5", len(got.Data.Events))
+	}
+
+	// Acceptance: one batched query for all five events, not five.
+	if n := st.calls.Load(); n != 1 {
+		t.Errorf("LinksForEvents dispatched %d times, want 1 (DataLoader should batch all five events)", n)
+	}
+
+	// The single link is attributed to both of its endpoints, and nowhere else.
+	links := map[string]int{}
+	for _, e := range got.Data.Events {
+		links[e.ID] = len(e.Links)
+	}
+	if links["01EVT0"] != 1 || links["01EVT1"] != 1 {
+		t.Errorf("linked endpoints: 01EVT0=%d 01EVT1=%d, want 1 each", links["01EVT0"], links["01EVT1"])
+	}
+	if links["01EVT2"] != 0 {
+		t.Errorf("unlinked event 01EVT2 has %d links, want 0", links["01EVT2"])
 	}
 }
