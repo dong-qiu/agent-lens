@@ -124,14 +124,19 @@ Patch 文件的硬性约束:
 
 ## 现有 ADR 索引
 
-实时索引以本目录文件列表为准(`ls docs/ADR/`)。状态查头部第一行。当前(2026-05-01)摘要:
+实时索引以本目录文件列表为准(`ls docs/ADR/`)。状态查头部第一行。当前(2026-05-27)摘要:
 
 - **0001 v1 技术栈**(Accepted):Go / Postgres / MinIO / React / sigstore-go 的根决策。
 - **0002 把 token 用量纳入证据链**(Accepted):TokenUsage shape;cost 显式不做。
-- **0003 Agent 配置快照与 capture-time attestation**(草案):新增 `agent_config_snapshot` EventKind。
-- **0004 把 human_intervention 升为头等事件**(草案):新增 `human_intervention` EventKind 与 `Link.relation = intervenes`。
-- **0005 把 context 变换升为头等事件**(草案):新增 `context_transform` EventKind。
-- **spec-patches-pending-0003-0005.md**:三 ADR 接受时对 SPEC 的预合并补丁,接受合入即删。
+- **0003 Agent 配置快照与 capture-time attestation**(Accepted):新增 `agent_config_snapshot` EventKind。
+- **0004 把 human_intervention 升为头等事件**(Accepted):新增 `human_intervention` EventKind 与 `Link.relation = intervenes`。
+- **0005 把 context 变换升为头等事件**(Accepted):新增 `context_transform` EventKind。
+- **0006 v0.1.0 发布形态与分发渠道**(草案):personal mode 安装 + 发布 / 分发决策。
+- **0007 Sub-agent(Task 工具)透明度**(草案):父→子 `delegates` link 设计与开放问题。
+- **0008 Sub-agent 自动 link fallback**(草案):v0.1 K1 实证,撤回 `delegates`,落地 fallback。
+- **0009 Sub-agent 父→子自动链接(`delegates`)**(草案):SubagentStart.agent_id ↔ tool_result.agentId 桥接;v0.2 恢复 ADR 0007 D4 / 取代 ADR 0008 D3。
+
+(0003–0005 接受时的 `spec-patches-pending-0003-0005.md` 已随 #100 合入删除。)
 
 ## 参考
 
