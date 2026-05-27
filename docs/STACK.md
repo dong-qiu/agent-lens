@@ -18,7 +18,7 @@ Concise record of the stack chosen for v1, along with the alternatives we evalua
 | Frontend data | TanStack Query + GraphQL Codegen | SWR, Apollo | Lighter than Apollo, type-safe via codegen. |
 | Container build | Docker buildx (multi-arch) | ko, nixpacks | Standard, supports amd64 + arm64. |
 | Local orchestration | Docker Compose (M1) | k3d / kind | Lowest friction for the M1 demo. Helm chart is added in M3+. |
-| Self-observability | OpenTelemetry SDK + Prometheus + slog | None | The audit system itself must be observable. |
+| Self-observability | Prometheus `/metrics` + slog (shipped); OpenTelemetry SDK (deferred) | None | The audit system itself must be observable. `/metrics` exposes ingest / head-cache / GraphQL-latency collectors (#4); OTel tracing is deferred — see below. |
 
 ## Decisions deliberately deferred
 
@@ -26,3 +26,4 @@ Concise record of the stack chosen for v1, along with the alternatives we evalua
 - **ClickHouse**: not for the canonical store. Add as analytics replica when "Agent usage patterns" reports become a real workload.
 - **MCP server**: an Agent Lens MCP server (so Lens queries can be reflected back to the Agent) is an M4 nice-to-have, not on the M1 critical path.
 - **PII redaction model**: rule-based redaction first; ML-assisted only after the rule list has stabilized.
+- **OpenTelemetry SDK (tracing)**: `/metrics` (Prometheus) + slog cover counters and logs for v1; distributed tracing via OTel is deferred until cross-component spans (ingest → linker → store) are worth the wiring.

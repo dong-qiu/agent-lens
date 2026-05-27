@@ -17,6 +17,7 @@ import (
 	"github.com/dong-qiu/agent-lens/internal/auth"
 	"github.com/dong-qiu/agent-lens/internal/ingest"
 	"github.com/dong-qiu/agent-lens/internal/linking"
+	"github.com/dong-qiu/agent-lens/internal/metrics"
 	"github.com/dong-qiu/agent-lens/internal/migrate"
 	"github.com/dong-qiu/agent-lens/internal/query"
 	"github.com/dong-qiu/agent-lens/internal/store"
@@ -112,6 +113,10 @@ func main() {
 	r.Use(middleware.Timeout(30 * time.Second))
 
 	registerHealthz(r, st)
+
+	// /metrics at root (no auth) — Prometheus scrape target (SPEC §16.1,
+	// issue #4). Mounted outside /v1 so scrapers don't need the API token.
+	r.Handle("/metrics", metrics.Handler())
 
 	token := os.Getenv("AGENT_LENS_TOKEN")
 	if token == "" {

@@ -28,6 +28,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/dong-qiu/agent-lens/internal/hashchain"
+	"github.com/dong-qiu/agent-lens/internal/metrics"
 	"github.com/dong-qiu/agent-lens/internal/store"
 )
 
@@ -122,6 +123,7 @@ func (h *Handler) IngestNDJSON(w http.ResponseWriter, r *http.Request) {
 		}
 		var ev WireEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
+			metrics.IngestFailure("decode")
 			http.Error(w, "bad ndjson line: "+err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -147,6 +149,7 @@ func (h *Handler) IngestNDJSON(w http.ResponseWriter, r *http.Request) {
 // any) runs after the lock is released.
 func (h *Handler) Append(ctx context.Context, in *WireEvent) error {
 	if err := h.appendLocked(ctx, in); err != nil {
+		metrics.IngestFailure(failureReason(err))
 		return err
 	}
 	if h.after != nil {
@@ -212,7 +215,22 @@ func (h *Handler) appendLocked(ctx context.Context, in *WireEvent) error {
 		return err
 	}
 	h.heads[in.SessionID] = hash
+	metrics.EventIngested(in.Kind)
+	metrics.SetSessionHeadCacheSize(len(h.heads))
 	return nil
+}
+
+// failureReason maps an append error to a low-cardinality metric label,
+// mirroring writeAppendError's HTTP-status classification.
+func failureReason(err error) string {
+	switch {
+	case errors.Is(err, errMissingField), errors.Is(err, errInvalidKind):
+		return "validation"
+	case errors.Is(err, store.ErrDuplicate):
+		return "duplicate"
+	default:
+		return "store"
+	}
 }
 
 func validateWireEvent(in *WireEvent) error {
