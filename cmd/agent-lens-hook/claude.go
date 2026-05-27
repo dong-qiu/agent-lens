@@ -34,6 +34,11 @@ type claudeHookInput struct {
 	ToolName       string          `json:"tool_name,omitempty"`
 	ToolInput      json.RawMessage `json:"tool_input,omitempty"`
 	ToolResponse   json.RawMessage `json:"tool_response,omitempty"`
+	// SubagentStart / SubagentStop carry the sub-agent's identity. agent_id
+	// is the child-side key that matches the parent's Agent tool_result
+	// response.agentId (issue #85).
+	AgentID   string `json:"agent_id,omitempty"`
+	AgentType string `json:"agent_type,omitempty"`
 }
 
 // runClaude reads a Claude Code hook payload on stdin and forwards a wire
@@ -90,8 +95,38 @@ func buildEvents(in *claudeHookInput) (events []map[string]any, commit func() er
 		return []map[string]any{makeSessionStart(in)}, nil
 	case "Stop":
 		return makeStopEvents(in)
+	case "SubagentStart":
+		return []map[string]any{makeSubagentLifecycle(in, "subagent_start")}, nil
+	case "SubagentStop":
+		return []map[string]any{makeSubagentLifecycle(in, "subagent_stop")}, nil
 	}
 	return nil, nil
+}
+
+// makeSubagentLifecycle captures a Claude Code SubagentStart / SubagentStop
+// hook as a decision-marker event, mirroring makeSessionStart's shape. The
+// hook fires in the *sub-agent's own* session, so in.SessionID is the child
+// session id and payload.agent_id is the child's agent id.
+//
+// That (session_id, agent_id) pair is the child-side half of the parent→child
+// bridge: the parent's Agent tool_result carries the same agent_id under
+// response.agentId, so a linker can match the two and emit a `delegates` link
+// from parent to child. Capturing the lifecycle is ADR-free (payload-only);
+// the delegates link + RELATION_DELEGATES schema change is the ADR-gated
+// follow-up (issue #85, PR 2). Until then this already ends our blindness to
+// sub-agent start/stop in the timeline.
+func makeSubagentLifecycle(in *claudeHookInput, marker string) map[string]any {
+	payload := map[string]any{
+		"marker": marker,
+		"cwd":    in.CWD,
+	}
+	if in.AgentID != "" {
+		payload["agent_id"] = in.AgentID
+	}
+	if in.AgentType != "" {
+		payload["agent_type"] = in.AgentType
+	}
+	return baseEvent(in, map[string]any{"type": "system", "id": "claude-code"}, "decision", payload)
 }
 
 func makePrompt(in *claudeHookInput) map[string]any {
