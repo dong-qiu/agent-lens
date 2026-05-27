@@ -85,5 +85,10 @@ type Store interface {
 	// neighbouring sessions without paging through all events first
 	// (the link-bearing event may sit past any per-session limit).
 	LinksForSession(ctx context.Context, sessionID string) ([]*Link, error)
+	// Ping checks the backing store is reachable (e.g. a DB round-trip),
+	// returning nil when healthy. The /healthz probe calls it so a dead
+	// dependency surfaces as 503 instead of a misleading unconditional 200
+	// (issue #10).
+	Ping(ctx context.Context) error
 	Close() error
 }

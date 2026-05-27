@@ -23,6 +23,10 @@ func NewMemory() *Memory {
 	}
 }
 
+// Ping always succeeds: the in-memory store has no external dependency to
+// fail. Keeps /healthz honest for memory-mode dogfood runs.
+func (m *Memory) Ping(context.Context) error { return nil }
+
 func (m *Memory) Close() error { return nil }
 
 func (m *Memory) AppendEvent(_ context.Context, e *Event) error {

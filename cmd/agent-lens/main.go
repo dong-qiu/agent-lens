@@ -25,13 +25,32 @@ import (
 	githubwh "github.com/dong-qiu/agent-lens/internal/webhooks/github"
 )
 
-// registerHealthz wires the liveness probe for both GET and HEAD. HEAD
-// support matters for uptime checkers / load balancers that probe with
-// HEAD (issue #99): chi's r.Get matches GET only, so HEAD fell through to
-// the catch-all UI handler and 404'd. The handler only sets the status —
-// net/http suppresses the body for HEAD responses automatically.
-func registerHealthz(r chi.Router) {
-	h := func(w http.ResponseWriter, _ *http.Request) {
+// healthChecker is the slice of store.Store the probe needs: a cheap
+// reachability check on the backing dependency.
+type healthChecker interface {
+	Ping(ctx context.Context) error
+}
+
+// registerHealthz wires the health probe for both GET and HEAD. HEAD support
+// matters for uptime checkers / load balancers that probe with HEAD (issue
+// #99): chi's r.Get matches GET only, so HEAD fell through to the catch-all
+// UI handler and 404'd. net/http suppresses the body for HEAD automatically.
+//
+// The probe pings the store (issue #10) so a dead dependency returns 503
+// instead of a misleading unconditional 200. A short timeout keeps a hung DB
+// from stalling the probe. NB: this couples /healthz to the store, so it
+// behaves as a *readiness* check; when the k8s HA deployment (SPEC §13) needs
+// a DB-independent liveness probe, split them — restarting on a DB outage
+// won't fix the DB.
+func registerHealthz(r chi.Router, hc healthChecker) {
+	h := func(w http.ResponseWriter, req *http.Request) {
+		ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+		defer cancel()
+		if err := hc.Ping(ctx); err != nil {
+			slog.Warn("healthz: store unreachable", "err", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	}
 	r.Get("/healthz", h)
@@ -92,7 +111,7 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 
-	registerHealthz(r)
+	registerHealthz(r, st)
 
 	token := os.Getenv("AGENT_LENS_TOKEN")
 	if token == "" {
