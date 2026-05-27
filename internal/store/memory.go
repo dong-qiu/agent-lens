@@ -27,6 +27,26 @@ func NewMemory() *Memory {
 // fail. Keeps /healthz honest for memory-mode dogfood runs.
 func (m *Memory) Ping(context.Context) error { return nil }
 
+// UsageEventsBySessions returns each requested session's events in append
+// order (issue #65). Unlike Postgres it does not pre-filter to usage-bearing
+// events — the events are already in memory, so the caller's aggregator
+// skipping non-usage events costs nothing and the totals are identical.
+func (m *Memory) UsageEventsBySessions(_ context.Context, ids []string) (map[string][]*Event, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	want := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		want[id] = struct{}{}
+	}
+	out := map[string][]*Event{}
+	for _, e := range m.events {
+		if _, ok := want[e.SessionID]; ok {
+			out[e.SessionID] = append(out[e.SessionID], e)
+		}
+	}
+	return out, nil
+}
+
 func (m *Memory) Close() error { return nil }
 
 func (m *Memory) AppendEvent(_ context.Context, e *Event) error {

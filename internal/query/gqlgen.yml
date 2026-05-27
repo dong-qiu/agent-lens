@@ -34,9 +34,7 @@ models:
         resolver: true
       stopReason:
         resolver: true
-  Session:
-    fields:
-      # totalUsage loads all events in the session to aggregate; lazy
-      # so the cheap `sessions()` listing isn't burdened by it.
-      totalUsage:
-        resolver: true
+  # Session.totalUsage is served from the model field, populated eagerly in
+  # one batched query by the `sessions` resolver (issue #65). It used to be a
+  # per-Session resolver, which N+1'd a full-session load per row on every
+  # 5 s SessionList refetch.

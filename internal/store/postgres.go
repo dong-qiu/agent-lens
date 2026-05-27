@@ -29,6 +29,35 @@ func OpenPostgres(ctx context.Context, dsn string) (*Postgres, error) {
 	return &Postgres{pool: pool}, nil
 }
 
+// UsageEventsBySessions returns usage-bearing events for the given session
+// ids in a single query (issue #65). jsonb_exists filters to events that
+// actually carry payload.usage server-side, so the SessionList aggregation
+// doesn't transfer every event row. Only session_id + payload are selected —
+// the only fields aggregateSessionUsage reads.
+func (p *Postgres) UsageEventsBySessions(ctx context.Context, ids []string) (map[string][]*Event, error) {
+	out := map[string][]*Event{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	const q = `SELECT session_id, payload FROM events
+		WHERE session_id = ANY($1) AND jsonb_exists(payload, 'usage')
+		ORDER BY session_id, id ASC`
+	rows, err := p.pool.Query(ctx, q, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sid string
+		var payload []byte
+		if err := rows.Scan(&sid, &payload); err != nil {
+			return nil, err
+		}
+		out[sid] = append(out[sid], &Event{SessionID: sid, Payload: payload})
+	}
+	return out, rows.Err()
+}
+
 // Ping round-trips the connection pool so /healthz reflects real DB
 // reachability rather than an unconditional 200 (issue #10).
 func (p *Postgres) Ping(ctx context.Context) error {

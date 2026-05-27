@@ -643,3 +643,89 @@ func TestLinkedEventsResolver_BearerChainContext(t *testing.T) {
 		t.Errorf("expected chain-context to bound result (~22 events), got %d — looks like seed session was returned in full", len(got.Data.LinkedEvents))
 	}
 }
+
+// TestSessionsTotalUsageBatched exercises the issue #65 path end-to-end:
+// `sessions { totalUsage }` must aggregate per session via the eager batched
+// query (no per-row resolver), sum numeric counters, keep a homogeneous
+// vendor, and return null for a session with no usage-bearing events.
+func TestSessionsTotalUsageBatched(t *testing.T) {
+	st := store.NewMemory()
+	r := chi.NewRouter()
+	r.Route("/v1", func(sub chi.Router) {
+		ingest.RegisterRoutes(sub, st)
+		query.RegisterRoutes(sub, st)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	// s1: two usage-bearing events (sum 30/15) plus one without usage.
+	// s2: no usage at all → totalUsage must be null.
+	ndjson := strings.Join([]string{
+		`{"session_id":"s1","actor":{"type":"agent","id":"c","model":"m"},"kind":"thought","payload":{"usage":{"vendor":"anthropic","model":"m","input_tokens":10,"output_tokens":5}}}`,
+		`{"session_id":"s1","actor":{"type":"agent","id":"c","model":"m"},"kind":"decision","payload":{"usage":{"vendor":"anthropic","model":"m","input_tokens":20,"output_tokens":10}}}`,
+		`{"session_id":"s1","actor":{"type":"human","id":"a"},"kind":"prompt","payload":{"text":"hi"}}`,
+		`{"session_id":"s2","actor":{"type":"human","id":"a"},"kind":"prompt","payload":{"text":"no usage here"}}`,
+	}, "\n")
+	resp, err := http.Post(srv.URL+"/v1/events", "application/x-ndjson", strings.NewReader(ndjson))
+	if err != nil {
+		t.Fatalf("ingest post: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, want 200", resp.StatusCode)
+	}
+
+	gqlBody := `{"query":"{ sessions { id totalUsage { inputTokens outputTokens vendor } } }"}`
+	resp, err = http.Post(srv.URL+"/v1/graphql", "application/json", strings.NewReader(gqlBody))
+	if err != nil {
+		t.Fatalf("graphql post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var got struct {
+		Data struct {
+			Sessions []struct {
+				ID         string `json:"id"`
+				TotalUsage *struct {
+					InputTokens  int    `json:"inputTokens"`
+					OutputTokens int    `json:"outputTokens"`
+					Vendor       string `json:"vendor"`
+				} `json:"totalUsage"`
+			} `json:"sessions"`
+		} `json:"data"`
+		Errors []map[string]any `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Errors) > 0 {
+		t.Fatalf("graphql errors: %+v", got.Errors)
+	}
+	if len(got.Data.Sessions) != 2 {
+		t.Fatalf("got %d sessions, want 2", len(got.Data.Sessions))
+	}
+
+	seen := map[string]bool{}
+	for _, s := range got.Data.Sessions {
+		seen[s.ID] = true
+		switch s.ID {
+		case "s1":
+			if s.TotalUsage == nil {
+				t.Fatal("s1 totalUsage is null, want aggregated 30/15")
+			}
+			if s.TotalUsage.InputTokens != 30 || s.TotalUsage.OutputTokens != 15 {
+				t.Errorf("s1 totalUsage = %d/%d, want 30/15", s.TotalUsage.InputTokens, s.TotalUsage.OutputTokens)
+			}
+			if s.TotalUsage.Vendor != "anthropic" {
+				t.Errorf("s1 totalUsage.vendor = %q, want anthropic", s.TotalUsage.Vendor)
+			}
+		case "s2":
+			if s.TotalUsage != nil {
+				t.Errorf("s2 totalUsage = %+v, want null (no usage-bearing events)", s.TotalUsage)
+			}
+		}
+	}
+	if !seen["s1"] || !seen["s2"] {
+		t.Errorf("missing sessions in result: %+v", seen)
+	}
+}
