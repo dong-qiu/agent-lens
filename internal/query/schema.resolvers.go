@@ -95,8 +95,21 @@ func (r *queryResolver) Sessions(ctx context.Context, limit *int, since *time.Ti
 		return nil, err
 	}
 	out := make([]*Session, 0, len(list))
+	ids := make([]string, 0, len(list))
 	for _, s := range list {
 		out = append(out, toGQLSession(s))
+		ids = append(ids, s.ID)
+	}
+
+	// Populate totalUsage eagerly in one batched query rather than via a
+	// per-Session field resolver, which N+1'd a full-session load on every
+	// row of every 5 s SessionList refetch (issue #65).
+	usageEvents, err := r.Store.UsageEventsBySessions(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("UsageEventsBySessions: %w", err)
+	}
+	for _, s := range out {
+		s.TotalUsage = aggregateSessionUsage(usageEvents[s.ID])
 	}
 	return out, nil
 }
@@ -209,33 +222,11 @@ func (r *queryResolver) LinkedEvents(ctx context.Context, sessionID string, dept
 	return out, nil
 }
 
-// TotalUsage is the resolver for the totalUsage field.
-//
-// Loads every event in the session (limit=0 → unlimited) and walks
-// payload.usage on each. Aggregation is in-Go rather than SQL so the
-// memory store works the same way as Postgres; pushing this to a SQL
-// `SUM()` is a future optimization once sessions push past tens of
-// thousands of events.
-func (r *sessionResolver) TotalUsage(ctx context.Context, obj *Session) (*TokenUsage, error) {
-	if obj == nil {
-		return nil, nil
-	}
-	events, err := r.Store.ListBySession(ctx, obj.ID, 0)
-	if err != nil {
-		return nil, err
-	}
-	return aggregateSessionUsage(events), nil
-}
-
 // Event returns EventResolver implementation.
 func (r *Resolver) Event() EventResolver { return &eventResolver{r} }
 
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
-// Session returns SessionResolver implementation.
-func (r *Resolver) Session() SessionResolver { return &sessionResolver{r} }
-
 type eventResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
-type sessionResolver struct{ *Resolver }

@@ -438,3 +438,48 @@ func TestPostgresLinkRoundTrip(t *testing.T) {
 		t.Errorf("EventsByRef miss returned %d events", len(none))
 	}
 }
+
+// TestPostgresUsageEventsBySessions validates the issue #65 batched query:
+// jsonb_exists filters to usage-bearing events server-side, results group by
+// session, and absent ids don't appear. Exercises the raw SQL against a real
+// Postgres (the memory store takes a different, all-events path).
+func TestPostgresUsageEventsBySessions(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := openPostgresWithSchema(ctx, t)
+	defer cleanup()
+
+	now := time.Now().UTC()
+	withUsage := []byte(`{"usage":{"vendor":"anthropic","input_tokens":10,"output_tokens":5}}`)
+	noUsage := []byte(`{"text":"hi"}`)
+	events := []*Event{
+		{ID: "01USG1", TS: now, SessionID: "s1", ActorType: "agent", ActorID: "c", Kind: "decision", Hash: "u1", Payload: withUsage},
+		{ID: "01USG2", TS: now.Add(time.Second), SessionID: "s1", ActorType: "human", ActorID: "a", Kind: "prompt", Hash: "u2", PrevHash: "u1", Payload: noUsage},
+		{ID: "01USG3", TS: now.Add(2 * time.Second), SessionID: "s1", ActorType: "agent", ActorID: "c", Kind: "decision", Hash: "u3", PrevHash: "u2", Payload: withUsage},
+		{ID: "01USG4", TS: now, SessionID: "s2", ActorType: "agent", ActorID: "c", Kind: "decision", Hash: "v1", Payload: withUsage},
+		{ID: "01USG5", TS: now.Add(time.Second), SessionID: "s2", ActorType: "human", ActorID: "a", Kind: "prompt", Hash: "v2", PrevHash: "v1", Payload: noUsage},
+	}
+	for _, e := range events {
+		if err := st.AppendEvent(ctx, e); err != nil {
+			t.Fatalf("append %s: %v", e.ID, err)
+		}
+	}
+
+	got, err := st.UsageEventsBySessions(ctx, []string{"s1", "s2", "s3-absent"})
+	if err != nil {
+		t.Fatalf("UsageEventsBySessions: %v", err)
+	}
+	if len(got["s1"]) != 2 {
+		t.Errorf("s1: got %d usage events, want 2 (jsonb_exists should drop the no-usage prompt)", len(got["s1"]))
+	}
+	if len(got["s2"]) != 1 {
+		t.Errorf("s2: got %d usage events, want 1", len(got["s2"]))
+	}
+	if _, present := got["s3-absent"]; present {
+		t.Errorf("s3-absent must not appear in the result map")
+	}
+
+	empty, err := st.UsageEventsBySessions(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Errorf("empty ids: got %v (err %v), want empty map and no query", empty, err)
+	}
+}

@@ -78,6 +78,14 @@ type Store interface {
 	// limit <= 0 means "no limit". If since is non-zero, only sessions
 	// with LastEventAt >= since are returned.
 	ListSessions(ctx context.Context, limit int, since time.Time) ([]*SessionSummary, error)
+	// UsageEventsBySessions returns, per session id, the events needed to
+	// aggregate Session.totalUsage — in one round trip for the whole set, so
+	// the SessionList page doesn't fan out to a full-session load per row
+	// (issue #65). Postgres filters to usage-bearing events server-side;
+	// memory returns each session's events and lets the caller's aggregator
+	// skip the rest — both yield identical totals. Ids absent from the map
+	// have no usage to aggregate.
+	UsageEventsBySessions(ctx context.Context, ids []string) (map[string][]*Event, error)
 	AppendLink(ctx context.Context, l *Link) error
 	LinksForEvent(ctx context.Context, eventID string) ([]*Link, error)
 	// LinksForSession returns every link with at least one endpoint
