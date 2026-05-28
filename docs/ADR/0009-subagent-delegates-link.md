@@ -1,9 +1,11 @@
 # ADR 0009:Sub-agent 父→子自动链接(`delegates`,基于 SubagentStart 桥接)
 
-- 状态:草案
+- 状态:草案 — **needs-revision**(2026-05-28 §验证 证伪 D2/D3 核心桥接假设;问题重构为 #122)
 - 日期:2026-05-27
 - 取代:在 v0.2 范围内重新激活 ADR 0007 D4(`delegates` 关系),取代 ADR 0008 D3(v0.1 撤回 `delegates`)
 - 修订(待 Accepted):SPEC §7(`Relation` 枚举加 `delegates`)、§10.1(sub-agent 派发段)
+
+> **⚠️ needs-revision(2026-05-28)。** §验证 实测后,本 ADR 的核心前提——`SubagentStart` 在**子会话**触发、可经其桥到一条独立子会话——**被证伪**:`SubagentStart`/`SubagentStop` 实际在**父会话**触发,且 sub-agent 的工作**内联在父会话**、其工具调用 payload **无 `agent_id`**(详见 §验证 实测结论)。`agentId == agent_id` 这一点**确认成立**,但 D2 / D3 的桥接设计作废,`delegates` link 降级为父会话内匹配,稳健归属需上游 Claude Code 支持。问题已重构为 **#122**(sub-agent 活动内联捕获但无法归属)。**本 ADR 在 #122 给出修订/取代方案前,不应 Accept、不应据其落代码。**
 
 ## 背景
 
@@ -14,6 +16,20 @@ ADR 0008(v0.1)**撤回**了 ADR 0007 D4 承诺的 `delegates` link:当时父侧 
 这把 ADR 0008 否决的脆路径替换成一条**确定性 id 匹配**路径:父侧 tool_result 带 `agentId`,子侧 SubagentStart 带 `agent_id` + `session_id`。若两个 id 相等,父→子映射唯一确定,**不依赖时间窗、不怕并发派发**——恰好绕开了 ADR 0008 否决 C 的核心理由。本 ADR 决定在 v0.2 据此落 `delegates` link。
 
 ## 验证
+
+### 实测结论(2026-05-28,探针 hook,本仓库)
+
+| 项 | 结果 |
+|---|---|
+| `parent tool_result.response.agentId == SubagentStart.agent_id` | ✅ **确认**(2/2 派发精确相等:`ad1228167b03966fb`、`abd20abe0e6e2e979`) |
+| `SubagentStart` / `SubagentStop` 触发位置 | ❌ 在**父会话**(`session_id` = 父),**不是**子会话 → 下方"待测枢纽"假设的"子侧带子 `session_id`"**证伪** |
+| sub-agent 自身工具调用 | 触发 `PreToolUse`、落在**父 `session_id`**、payload **无 `agent_id`** → sub-agent 工作内联在父会话、与父自身工具调用无法区分 |
+
+**后果**:D2 / D3(经 `SubagentStart.session_id` = 子会话桥接到独立子会话)**作废**——不存在可链的独立子会话。`delegates` link 降级为**父会话内** `agentId` ↔ `SubagentStart.agent_id` 匹配 + Start/Stop 括(仅顺序派发稳健;并发派发因工具调用无 `agent_id` 而失准)。稳健的逐 sub-agent 归属需**上游 Claude Code** 在 sub-agent 工具 hook payload 上带 `agent_id`。完整重构见 **#122**;另见 ADR 0008 的"独立子 UUID"观察已过时(Claude Code 现内联运行 sub-agent)。
+
+---
+
+(以下为本 ADR 起草时的待测计划,实测后保留作记录。)
 
 分三层,**诚实区分已确认与待测**(沿用 ADR 0004 §验证"显式标注未实测假设"的做法):
 
