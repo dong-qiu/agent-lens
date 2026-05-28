@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dong-qiu/agent-lens/internal/redact"
@@ -138,7 +139,37 @@ func makePrompt(in *claudeHookInput) map[string]any {
 	if n > 0 {
 		payload["redacted_count"] = n
 	}
-	return baseEvent(in, map[string]any{"type": "human", "id": "user"}, "prompt", payload)
+	// UserPromptSubmit also fires for system-injected blocks — a backgrounded
+	// task / sub-agent completion (<task-notification>) or a system nudge
+	// (<system-reminder>) — which are NOT human input. Attribute them to the
+	// system and record payload.source so "who said what" stays honest and
+	// "human prompt" queries don't over-count (issue #118). Detection is on the
+	// raw prompt (the structural tag survives redaction and rides at the head).
+	actor := map[string]any{"type": "human", "id": "user"}
+	if src := injectedPromptSource(in.Prompt); src != "" {
+		actor = map[string]any{"type": "system", "id": "claude-code"}
+		payload["source"] = src
+	}
+	return baseEvent(in, actor, "prompt", payload)
+}
+
+// injectedPromptSource classifies a UserPromptSubmit body that is actually a
+// system-injected block rather than human input, returning a low-cardinality
+// source label ("" for a genuine human prompt). Conservative on purpose:
+// only clearly system-generated blocks are matched — slash-command echoes are
+// human-initiated and intentionally left as human input. Content-based because
+// the hook payload carries no source field; the blocks open with known tags.
+func injectedPromptSource(prompt string) string {
+	t := strings.TrimLeft(prompt, " \t\r\n")
+	switch {
+	case strings.HasPrefix(t, "<task-notification"):
+		return "task_notification"
+	case strings.HasPrefix(t, "<system-reminder"):
+		return "system_reminder"
+	case strings.HasPrefix(t, "<task-reminder"):
+		return "task_reminder"
+	}
+	return ""
 }
 
 func makeToolCall(in *claudeHookInput) map[string]any {
