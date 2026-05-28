@@ -2,6 +2,7 @@ import { lazy, Suspense, useMemo, useState } from "react";
 import type { Event } from "../types";
 import { styleFor, formatTimestamp } from "./kindStyle";
 import { payloadToDiff } from "../lib/payloadToDiff";
+import { parsePrompt } from "../lib/prompts";
 import { AgentDispatchChip } from "./AgentDispatchChip";
 import { RedactionChip } from "./RedactionChip";
 import { TokenUsageChip } from "./TokenUsageChip";
@@ -17,7 +18,19 @@ export function EventCard({ event }: { event: Event }) {
   const [showRaw, setShowRaw] = useState(false);
   const style = styleFor(event.kind);
 
-  const summary = summarize(event);
+  // A PROMPT may actually be a system-injected block (e.g. <task-notification>
+  // from a backgrounded task) the hook recorded as a human prompt — parse it so
+  // the card shows readable fields instead of raw XML (issue #118).
+  const promptParse = useMemo(
+    () =>
+      event.kind === "PROMPT"
+        ? parsePrompt(
+            typeof event.payload?.text === "string" ? (event.payload.text as string) : "",
+          )
+        : null,
+    [event.kind, event.payload],
+  );
+  const summary = promptParse ? promptParse.title : summarize(event);
   const hasPayload = event.payload && Object.keys(event.payload).length > 0;
   const diffs = useMemo(
     () =>
@@ -117,6 +130,14 @@ export function EventCard({ event }: { event: Event }) {
                 stopReason={event.stopReason}
               />
             )}
+            {promptParse && !promptParse.human && (
+              <span
+                className="inline-flex items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 ring-1 ring-zinc-300"
+                title="System-injected message (e.g. a backgrounded task completing), not human input. Captured as a prompt by the hook — see issue #118."
+              >
+                🔔 injected
+              </span>
+            )}
             {event.links?.length > 0 && (
               <span
                 className="inline-flex items-center gap-0.5 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 ring-1 ring-zinc-300"
@@ -136,6 +157,16 @@ export function EventCard({ event }: { event: Event }) {
             <div className="mt-1.5 text-sm text-zinc-800 break-words">
               {summary}
             </div>
+          )}
+          {promptParse && promptParse.fields.length > 0 && (
+            <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[11px]">
+              {promptParse.fields.map((f) => (
+                <div key={f.label} className="contents">
+                  <dt className="text-zinc-400">{f.label}</dt>
+                  <dd className="break-words font-mono text-zinc-700">{f.value}</dd>
+                </div>
+              ))}
+            </dl>
           )}
           <div className="mt-1.5 text-[11px] text-zinc-400 font-mono truncate">
             {event.id} · hash {event.hash.slice(0, 12)}
