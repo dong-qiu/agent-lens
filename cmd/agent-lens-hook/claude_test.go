@@ -58,6 +58,67 @@ func TestBuildEventsUserPromptRedacts(t *testing.T) {
 	}
 }
 
+func TestMakePromptHumanUnchanged(t *testing.T) {
+	evs, _ := buildEvents(&claudeHookInput{
+		HookEventName: "UserPromptSubmit",
+		SessionID:     "s1",
+		Prompt:        "build me an X",
+	})
+	actor := evs[0]["actor"].(map[string]any)
+	if actor["type"] != "human" || actor["id"] != "user" {
+		t.Errorf("actor = %+v, want human/user", actor)
+	}
+	if _, ok := evs[0]["payload"].(map[string]any)["source"]; ok {
+		t.Errorf("a genuine human prompt should not carry payload.source")
+	}
+}
+
+// TestMakePromptInjectedAttributedToSystem guards issue #118: system-injected
+// UserPromptSubmit blocks must be attributed to the system, not the human, and
+// carry a source discriminator.
+func TestMakePromptInjectedAttributedToSystem(t *testing.T) {
+	cases := []struct{ name, prompt, wantSource string }{
+		{"task-notification", "<task-notification>\n<task-id>blr2t3oka</task-id>\n<status>completed</status>\n</task-notification>", "task_notification"},
+		{"system-reminder", "<system-reminder>Plan mode is active.</system-reminder>", "system_reminder"},
+		{"leading whitespace", "\n  <task-notification><task-id>x</task-id></task-notification>", "task_notification"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			evs, _ := buildEvents(&claudeHookInput{
+				HookEventName: "UserPromptSubmit",
+				SessionID:     "s1",
+				Prompt:        tc.prompt,
+			})
+			if evs[0]["kind"] != "prompt" {
+				t.Fatalf("kind = %v, want prompt", evs[0]["kind"])
+			}
+			actor := evs[0]["actor"].(map[string]any)
+			if actor["type"] != "system" || actor["id"] != "claude-code" {
+				t.Errorf("actor = %+v, want system/claude-code", actor)
+			}
+			if got := evs[0]["payload"].(map[string]any)["source"]; got != tc.wantSource {
+				t.Errorf("payload.source = %v, want %v", got, tc.wantSource)
+			}
+		})
+	}
+}
+
+func TestInjectedPromptSource(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"build me an X", ""},
+		{"<div> is broken, fix it", ""}, // human prompt that merely starts with "<"
+		{"<task-notification><task-id>x</task-id></task-notification>", "task_notification"},
+		{"  \n<system-reminder>hi</system-reminder>", "system_reminder"},
+		{"<task-reminder>do the thing</task-reminder>", "task_reminder"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := injectedPromptSource(tc.in); got != tc.want {
+			t.Errorf("injectedPromptSource(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestBuildEventsPreToolUse(t *testing.T) {
 	evs, _ := buildEvents(&claudeHookInput{
 		HookEventName: "PreToolUse",
