@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Timeline } from "./components/Timeline";
+import { StoryTimeline } from "./components/StoryTimeline";
 import { SessionList } from "./components/SessionList";
 import { CausalGraph } from "./components/CausalGraph";
 
-type View = "timeline" | "graph";
+type View = "timeline" | "story" | "graph";
 
 function getInitialSession(): string {
   return new URLSearchParams(window.location.search).get("session") ?? "";
@@ -11,7 +12,7 @@ function getInitialSession(): string {
 
 function getInitialView(): View {
   const v = new URLSearchParams(window.location.search).get("view");
-  return v === "graph" ? "graph" : "timeline";
+  return v === "graph" ? "graph" : v === "story" ? "story" : "timeline";
 }
 
 function getInitialLinked(): boolean {
@@ -73,7 +74,9 @@ export default function App() {
       ? linked
         ? "M2 cross-session graph"
         : "M2 causal graph"
-      : "M1 timeline"
+      : view === "story"
+        ? "turn-grouped story"
+        : "M1 timeline"
     : "M2 sessions";
 
   // Graph view needs more horizontal room (dagre lays a wide DAG; the
@@ -127,6 +130,8 @@ export default function App() {
         {sessionId ? (
           view === "graph" ? (
             <CausalGraph sessionId={sessionId} linked={linked} />
+          ) : view === "story" ? (
+            <StoryTimeline sessionId={sessionId} />
           ) : (
             <Timeline sessionId={sessionId} />
           )
@@ -155,6 +160,12 @@ function ViewToggle({
         onClick={() => onSelect("timeline")}
       >
         Timeline
+      </ToggleButton>
+      <ToggleButton
+        active={view === "story"}
+        onClick={() => onSelect("story")}
+      >
+        Story
       </ToggleButton>
       <ToggleButton
         active={view === "graph"}
