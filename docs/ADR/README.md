@@ -124,7 +124,7 @@ Patch 文件的硬性约束:
 
 ## 现有 ADR 索引
 
-实时索引以本目录文件列表为准(`ls docs/ADR/`)。状态查头部第一行。当前(2026-05-27)摘要:
+实时索引以本目录文件列表为准(`ls docs/ADR/`)。状态查头部第一行。当前(2026-05-29)摘要:
 
 - **0001 v1 技术栈**(Accepted):Go / Postgres / MinIO / React / sigstore-go 的根决策。
 - **0002 把 token 用量纳入证据链**(Accepted):TokenUsage shape;cost 显式不做。
@@ -134,7 +134,11 @@ Patch 文件的硬性约束:
 - **0006 v0.1.0 发布形态与分发渠道**(草案):personal mode 安装 + 发布 / 分发决策。
 - **0007 Sub-agent(Task 工具)透明度**(草案):父→子 `delegates` link 设计与开放问题。
 - **0008 Sub-agent 自动 link fallback**(草案):v0.1 K1 实证,撤回 `delegates`,落地 fallback。
-- **0009 Sub-agent 父→子自动链接(`delegates`)**(草案):SubagentStart.agent_id ↔ tool_result.agentId 桥接;v0.2 恢复 ADR 0007 D4 / 取代 ADR 0008 D3。
+- **0009 Sub-agent 父→子自动链接(`delegates`)**(草案 — needs-revision):SubagentStart.agent_id ↔ tool_result.agentId 桥接;§验证 推翻桥接前提,已重构挂 #122(详见头部)。
+- **0010 用 PermissionRequest / PermissionDenied 捕获权限请求一手证据**(草案):修正 0004 D2 的 PreToolUse 来源声明(D2 共存/链接决定不变);仅在权限 gate 实际出现时发 `permission_decision`,allow 与 auto-deny 为 observed、交互式拒绝记 `unresolved`、自动放行不记为人类干预(授权事实归 `permission_mode`);给 0004 D1 `decision` 集合增 `unresolved`,EventKind 复用 0004。
+- **0011 本地测试执行的采集**(草案):填 proto 既有但无产出方的 `test_run` 空 schema 位;PostToolUse(Bash)首-token 识别(剥包装器/启动器、拒绝 echo/cat/grep 假阳)、裁决均 inferred、命令脱敏姿态随 tool_result,不引入新 EventKind。
+- **0012 订阅 SessionEnd 补齐会话边界**(草案):SessionEnd(matcher `reason`)闭合会话边界;SessionStart **仅**增采 `source`(`model`/`agent_type` 归 0003,避免双写漂移);复用既有 `decision` marker,可独立接受。
+- **0013 订阅 PreCompact / PostCompact 把 compaction 从 inferred 提到 observed**(草案):精化 0005 D5;`PreCompact` 标 provisional、`PostCompact` 确认升 observed;`custom_instructions` 据实抓取脱敏;已解除对 0012 的依赖;复用 0005 `context_transform`。
 
 (0003–0005 接受时的 `spec-patches-pending-0003-0005.md` 已随 #100 合入删除。)
 
