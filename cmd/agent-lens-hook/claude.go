@@ -40,6 +40,10 @@ type claudeHookInput struct {
 	// response.agentId (issue #85).
 	AgentID   string `json:"agent_id,omitempty"`
 	AgentType string `json:"agent_type,omitempty"`
+	// SessionStart carries source (startup/resume/clear/compact); SessionEnd
+	// carries reason (clear/resume/logout/prompt_input_exit/...). ADR 0012.
+	Source string `json:"source,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // runClaude reads a Claude Code hook payload on stdin and forwards a wire
@@ -94,6 +98,8 @@ func buildEvents(in *claudeHookInput) (events []map[string]any, commit func() er
 		return []map[string]any{makeToolResult(in)}, nil
 	case "SessionStart":
 		return []map[string]any{makeSessionStart(in)}, nil
+	case "SessionEnd":
+		return []map[string]any{makeSessionEnd(in)}, nil
 	case "Stop":
 		return makeStopEvents(in)
 	case "SubagentStart":
@@ -273,12 +279,37 @@ func makeSessionStart(in *claudeHookInput) map[string]any {
 		"marker": "session_start",
 		"cwd":    in.CWD,
 	}
+	// SessionStart.source (startup/resume/clear/compact) gives the session a
+	// typed origin; source=resume pairs with SessionEnd.reason=resume to
+	// reconstruct cross-process continuation. ADR 0012 D2. Only `source` is
+	// taken here — model / agent_type / session_title belong to the
+	// agent_config_snapshot (ADR 0003), not loose in this payload.
+	if in.Source != "" {
+		payload["source"] = in.Source
+	}
 	// Capture the project-local Claude Code permission policy in
 	// effect for this session so audit reports can answer "what
 	// authorization rules were running at the time?". Absent settings
 	// is fine — the field is just omitted.
 	if perms := loadPermissionsSnapshot(in.CWD); perms != nil {
 		payload["permissions"] = perms
+	}
+	return baseEvent(in, map[string]any{"type": "system", "id": "claude-code"}, "decision", payload)
+}
+
+// makeSessionEnd captures the Claude Code SessionEnd hook as a decision-marker
+// event, mirroring makeSessionStart, so a session has an explicit closing
+// boundary. reason (clear/resume/logout/prompt_input_exit/...) lets audit
+// distinguish a clean exit from a resume continuation or a /clear. A crash or
+// kill fires no SessionEnd — the absence of session_end is itself the signal.
+// ADR 0012 D1.
+func makeSessionEnd(in *claudeHookInput) map[string]any {
+	payload := map[string]any{
+		"marker": "session_end",
+		"cwd":    in.CWD,
+	}
+	if in.Reason != "" {
+		payload["reason"] = in.Reason
 	}
 	return baseEvent(in, map[string]any{"type": "system", "id": "claude-code"}, "decision", payload)
 }
