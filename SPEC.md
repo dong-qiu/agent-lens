@@ -1,7 +1,9 @@
 # Agent Lens — 项目 SPEC
 
-> 版本：v0.6（2026-05-12）
+> 版本：v0.7（2026-05-30）
 > 状态：草案 / 规划阶段
+>
+> v0.7 变更：订阅 `SessionEnd` hook，给会话补显式闭边界（`decision.session_end` + `reason`）；`SessionStart` 增采 `source`（startup/resume/clear/compact）。详见 `docs/ADR/0012-session-end-hook.md`。
 >
 > v0.6 变更：把"agent 决策时所处配置"、"人对 agent 行为的反馈"、"context 在 turn 间的有损变换"分别升为头等事件，新增 EventKind `agent_config_snapshot` / `human_intervention` / `context_transform`。新增 Link.relation `intervenes`。新增 R8（compaction 启发式建模）。capture-time attestation 内联进配置快照，与事件 hash chain 同节点定锚。详见 `docs/ADR/0003-agent-config-snapshot.md` / `0004-human-intervention-events.md` / `0005-context-transform-events.md`。
 >
@@ -174,7 +176,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 ### 10.1 Claude Code（首发）
 
 **事件捕获路径**：
-- **Hook 直采**（`SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop` / `SubagentStart` / `SubagentStop`）：覆盖 prompt、工具调用与结果、会话/turn 边界、sub-agent 生命周期。`UserPromptSubmit` 中的系统注入块(后台任务完成的 `<task-notification>`、`<system-reminder>` 等)归 `actor=system` 并带 `payload.source`,不被当作人类 prompt(#118)。事件由 `agent-lens-hook claude` 子命令解析 stdin 并 POST 到 Ingest；Ingest 不可达时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink，供日后 `agent-lens replay`。
+- **Hook 直采**（`SessionStart` / `SessionEnd` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop` / `SubagentStart` / `SubagentStop`）：覆盖 prompt、工具调用与结果、会话/turn 边界、sub-agent 生命周期。`SessionStart` 派生 `decision.session_start`（含 `source`：startup/resume/clear/compact）、`SessionEnd` 派生 `decision.session_end`（含 `reason`：clear/resume/logout/prompt_input_exit/…），给会话显式闭边界；resume 续接按 `source`/`reason` 配对还原，崩溃 / 被 kill 时无 `session_end`、靠"未收尾"反推（详见 ADR 0012）。`UserPromptSubmit` 中的系统注入块(后台任务完成的 `<task-notification>`、`<system-reminder>` 等)归 `actor=system` 并带 `payload.source`,不被当作人类 prompt(#118)。事件由 `agent-lens-hook claude` 子命令解析 stdin 并 POST 到 Ingest；Ingest 不可达时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink，供日后 `agent-lens replay`。
 - **Transcript 旁路**（`Stop` 触发时）：读取 hook payload 的 `transcript_path`，对自上次 cursor 起新增的 jsonl 行做增量解析，提取每个 assistant 消息的 `thinking` 与 `text` content block：
   - `thinking` block → `EVENT_KIND_THOUGHT`
   - `text` block → `EVENT_KIND_DECISION`，payload.marker = `assistant_message`
