@@ -28,12 +28,15 @@ Claude Code 官方 hooks 文档(https://code.claude.com/docs/en/hooks,2026-05-29
 - `SessionStart` 除 `source` 外还暴露 `model`、`agent_type`、`session_title`——可顺手采下,补强 0003 的 session 锚点(见 D2)。
 - `source = compact` 在一次 compaction 之后触发;ADR 0013 已改用专门的 `PostCompact` 作后括号、不再依赖本字段,故本字段在此仅作 compaction 的辅助佐证,非 0013 的必需前置。
 
-**仍未决、落地前必须抓样核对**:
+**抓样核对结果(2026-05-31,#125 落地前)**:
 
-- `SessionEnd` 的实际 payload 字段名是否就是 `reason`(matcher key 已确认为 `reason`,但 stdin payload 的字段名待抓样确认)。
-- `SessionEnd` 在进程崩溃 / 被 kill 时是否仍发(预期不发——崩溃没机会跑 hook;此时会话只能靠"无 session_end 收尾"反推,需在 §15 标注)。
+- ✅ **字段名确认**:真实 SessionEnd stdin payload 的字段就是顶层 **`reason`**(非 `end_reason`、非嵌套),`claude.go` 的 `json:"reason"` 正确,无需改码。
+- ✅ **取值**:观测到 `prompt_input_exit`(正常退出)、`clear`(`/clear`),均在文档集合内。
+- 📌 **同 session 多条**:同一 `session_id` 跨多次退出 / 续接会发**多条** `session_end`(实测一个 id 出现 3 条 `prompt_input_exit`)——据此修正 §后果"每 session 1 条"。
+- ⏳ 未观测到 `reason=resume`(本次未触发到该退出路径),文档值保留待后续遇到时确认。
+- 进程崩溃 / 被 kill 时不发 `SessionEnd`(预期,hook 没机会跑),会话靠"无 session_end 收尾"反推——已记入 §15 R10。
 
-落地 PR 按 ADR 0002 同款记录覆盖度:用一份正常退出、一次 clear、一次 resume 续接的真实 session 核对上表。
+抓样方法:临时项目级 SessionEnd dump hook(`cat >> …`),触发正常退出 / `/clear` / resume,读原始 payload(ADR 0002 同款覆盖度记录)。
 
 ## 决定
 
@@ -79,10 +82,10 @@ Claude Code 官方 hooks 文档(https://code.claude.com/docs/en/hooks,2026-05-29
 
 - §10.1 Hook 直采列表增 `SessionEnd`;`SessionStart` 采集字段增 `source`(仅此一项)。
 - §7 `EventKind` 不变(`session_end` 用 `decision` marker,与 `session_start` 同档)。
-- §15:崩溃 / 被 kill 时 `SessionEnd` 不发,会话只能靠"无 session_end 收尾"反推——按 §验证 实测结论加一条已知局限。
+- §15:崩溃 / 被 kill 时 `SessionEnd` 不发,会话只能靠"无 session_end 收尾"反推——已加为 §15 R10(并记入实测:正常退出 / `/clear` 发、同 `session_id` 可多条)。
 - 与 ADR 0003 的关系:本 ADR**只**增采 `source`(session 边界语义),**不碰** 0003 拥有的 SessionStart 配置 payload(`model` / `agent_type` / `session_title` / `permissions`)——避免对同一 SessionStart payload 的双写漂移。`source` 与 0003 的 bundle 快照正交、同事件、不重叠。
 - 与 ADR 0013 的关系:0013 改用 `PostCompact` 作 compaction 后括号后,**两份 ADR 已互相独立**——本 ADR 的 `source=compact` 仅作 0013 的辅助佐证,非其必需前置;双方均可独立接受,无依赖方向。
-- 数据量:`session_end` 每 session 1 条,可忽略。
+- 数据量:`session_end` 每次会话退出 1 条;resume 续接的同一 `session_id` 可多条(实测一个 id 3 条),整体仍可忽略。
 
 ## 落地
 
