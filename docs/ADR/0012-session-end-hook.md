@@ -33,7 +33,7 @@ Claude Code 官方 hooks 文档(https://code.claude.com/docs/en/hooks,2026-05-29
 - ✅ **字段名确认**:真实 SessionEnd stdin payload 的字段就是顶层 **`reason`**(非 `end_reason`、非嵌套),`claude.go` 的 `json:"reason"` 正确,无需改码。
 - ✅ **取值**:观测到 `prompt_input_exit`(正常退出)、`clear`(`/clear`),均在文档集合内。
 - 📌 **同 session 多条**:同一 `session_id` 跨多次退出 / 续接会发**多条** `session_end`(实测一个 id 出现 3 条 `prompt_input_exit`)——据此修正 §后果"每 session 1 条"。
-- ⏳ 未观测到 `reason=resume`(本次未触发到该退出路径),文档值保留待后续遇到时确认。
+- ✅ **`reason=resume` 确认**:在活动会话内用 `/resume` **切走到另一段对话**时,被离开的会话发 `session_end` 带 `reason=resume`(实测:新会话切走得 `resume`;被切入的会话随后正常退出得 `prompt_input_exit`)。即 `resume` = "会话被存盘待续"而非终止。
 - 进程崩溃 / 被 kill 时不发 `SessionEnd`(预期,hook 没机会跑),会话靠"无 session_end 收尾"反推——已记入 §15 R10。
 
 抓样方法:临时项目级 SessionEnd dump hook(`cat >> …`),触发正常退出 / `/clear` / resume,读原始 payload(ADR 0002 同款覆盖度记录)。
