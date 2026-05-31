@@ -461,3 +461,47 @@ func TestReadMissingTranscript(t *testing.T) {
 		t.Error("expected error for missing transcript, got nil")
 	}
 }
+
+func TestParseUserRemindersExtracts(t *testing.T) {
+	// String content with a reminder embedded.
+	b := parseLine([]byte(`{"type":"user","message":{"content":"before <system-reminder>todo: X</system-reminder> after"}}`))
+	if len(b) != 1 || b[0].Kind != "system_reminder" || b[0].Content != "todo: X" {
+		t.Fatalf("string content: got %+v", b)
+	}
+	// Array content: reminder rides in a text block.
+	b = parseLine([]byte(`{"type":"user","message":{"content":[{"type":"text","text":"x <system-reminder>auto-memory</system-reminder>"}]}}`))
+	if len(b) != 1 || b[0].Content != "auto-memory" {
+		t.Fatalf("array content: got %+v", b)
+	}
+	// Two reminders in one message → two blocks.
+	b = parseLine([]byte(`{"type":"user","message":{"content":"<system-reminder>a</system-reminder><system-reminder>b</system-reminder>"}}`))
+	if len(b) != 2 {
+		t.Fatalf("multiple: got %d, want 2", len(b))
+	}
+}
+
+func TestParseUserRemindersNone(t *testing.T) {
+	if b := parseLine([]byte(`{"type":"user","message":{"content":"just a normal prompt"}}`)); b != nil {
+		t.Errorf("plain user message yielded %+v, want nil", b)
+	}
+}
+
+func TestSeenRemindersRoundTrip(t *testing.T) {
+	r := NewReader(t.TempDir())
+	if seen, err := r.SeenReminders("s1"); err != nil || len(seen) != 0 {
+		t.Fatalf("initial: %v / %+v", err, seen)
+	}
+	if err := r.AddSeenReminders("s1", []string{"h1", "h2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddSeenReminders("s1", []string{"h3"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddSeenReminders("s1", nil); err != nil {
+		t.Fatalf("empty append should be a no-op: %v", err)
+	}
+	seen, _ := r.SeenReminders("s1")
+	if len(seen) != 3 || !seen["h1"] || !seen["h2"] || !seen["h3"] {
+		t.Errorf("round-trip set = %+v, want {h1,h2,h3}", seen)
+	}
+}

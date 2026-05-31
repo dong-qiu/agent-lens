@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -340,6 +342,16 @@ func makeStopEvents(in *claudeHookInput) ([]map[string]any, func() error) {
 		return []map[string]any{turnEnd}, nil
 	}
 
+	// Per-session dedup state for system-reminder injections (ADR 0005 D3):
+	// emit each distinct reminder once. Fail-soft — a read error just means we
+	// might re-emit a reminder, never lose the turn's other events.
+	seenReminders, err := r.SeenReminders(in.SessionID)
+	if err != nil {
+		warn("seen reminders: %v", err)
+		seenReminders = map[string]bool{}
+	}
+	var newReminderHashes []string
+
 	events := make([]map[string]any, 0, len(blocks)+1)
 	for _, b := range blocks {
 		switch b.Kind {
@@ -374,12 +386,46 @@ func makeStopEvents(in *claudeHookInput) ([]map[string]any, func() error) {
 			}
 			attachUsageMetadata(payload, &b)
 			events = append(events, baseEvent(in, agentActorWithModel(b.Model), "decision", payload))
+		case "system_reminder":
+			// Harness-injected <system-reminder> → context_transform (ADR 0005
+			// D3). Dedup by content hash so a re-injected static reminder is
+			// recorded once per session; dynamic reminders (hash varies) each
+			// land once. observed: the reminder text is in the transcript.
+			h := sha256Hex(b.Content)
+			if seenReminders[h] {
+				continue
+			}
+			seenReminders[h] = true
+			newReminderHashes = append(newReminderHashes, h)
+			text, n := redactText(b.Content)
+			payload := map[string]any{
+				"sub_kind":       "system_reminder_injection",
+				"triggered_by":   "harness_auto",
+				"content_sha256": h,
+				"after":          map[string]any{"injected_text": text},
+				"loss_hint":      map[string]any{"confidence": "observed"},
+			}
+			if n > 0 {
+				payload["redacted_count"] = n
+			}
+			events = append(events, baseEvent(in, map[string]any{"type": "system", "id": "claude-code"}, "context_transform", payload))
 		}
 	}
 	events = append(events, turnEnd)
 
-	commit := func() error { return r.Commit(in.SessionID, offset) }
+	commit := func() error {
+		if err := r.Commit(in.SessionID, offset); err != nil {
+			return err
+		}
+		return r.AddSeenReminders(in.SessionID, newReminderHashes)
+	}
 	return events, commit
+}
+
+// sha256Hex is the content key used to dedup system-reminder injections.
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
 
 // attachUsageMetadata copies per-message usage / stop_reason from the

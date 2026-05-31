@@ -12,9 +12,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+// reSystemReminder matches a harness-injected <system-reminder> block in a
+// user message (ADR 0005 D3). Non-greedy + dotall so a multi-line reminder is
+// captured whole and multiple reminders in one message are matched separately.
+var reSystemReminder = regexp.MustCompile(`(?s)<system-reminder>(.*?)</system-reminder>`)
 
 // TokenUsage is the vendor-neutral token-counting shape per ADR 0002 D2.
 // Field names match the JSON keys the hook will emit on payload.usage so
@@ -25,16 +31,16 @@ import (
 // doesn't have a notion of cache writes (e.g. OpenAI) just omits them
 // rather than reporting zeros that look like real-but-empty buckets.
 type TokenUsage struct {
-	Vendor             string          `json:"vendor"`
-	Model              string          `json:"model"`
-	ServiceTier        string          `json:"service_tier,omitempty"`
-	InputTokens        int             `json:"input_tokens"`
-	OutputTokens       int             `json:"output_tokens"`
-	CacheReadTokens    int             `json:"cache_read_tokens,omitempty"`
-	CacheWrite5mTokens int             `json:"cache_write_5m_tokens,omitempty"`
-	CacheWrite1hTokens int             `json:"cache_write_1h_tokens,omitempty"`
-	WebSearchCalls     int             `json:"web_search_calls,omitempty"`
-	WebFetchCalls      int             `json:"web_fetch_calls,omitempty"`
+	Vendor             string `json:"vendor"`
+	Model              string `json:"model"`
+	ServiceTier        string `json:"service_tier,omitempty"`
+	InputTokens        int    `json:"input_tokens"`
+	OutputTokens       int    `json:"output_tokens"`
+	CacheReadTokens    int    `json:"cache_read_tokens,omitempty"`
+	CacheWrite5mTokens int    `json:"cache_write_5m_tokens,omitempty"`
+	CacheWrite1hTokens int    `json:"cache_write_1h_tokens,omitempty"`
+	WebSearchCalls     int    `json:"web_search_calls,omitempty"`
+	WebFetchCalls      int    `json:"web_fetch_calls,omitempty"`
 	// Raw is the verbatim vendor `usage` block, kept so we can re-derive
 	// fields if our normalization missed a column or if Anthropic's
 	// schema drifts. ADR 0002 D2 calls this "有意冗余" — a few hundred
@@ -57,7 +63,7 @@ type TokenUsage struct {
 // in turn / session aggregation. Carrier preference: first text block,
 // then first thinking block, else a synthesized stub text block.
 type Block struct {
-	Kind             string // "thinking" or "text"
+	Kind             string // "thinking", "text", or "system_reminder"
 	Content          string
 	MessageID        string
 	Model            string
@@ -127,6 +133,47 @@ func (r *Reader) Commit(sessionID string, offset int64) error {
 	}
 	path := filepath.Join(r.cursorDir, sessionID+".offset")
 	return os.WriteFile(path, []byte(strconv.FormatInt(offset, 10)), 0o600)
+}
+
+// SeenReminders loads the set of system-reminder content hashes already emitted
+// for sessionID, so a re-injected (static) reminder is emitted only once per
+// session (ADR 0005 D3). Missing file → empty set. Sidecar to the cursor,
+// persisted via AddSeenReminders only after a successful send.
+func (r *Reader) SeenReminders(sessionID string) (map[string]bool, error) {
+	path := filepath.Join(r.cursorDir, sessionID+".reminders")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]bool{}, nil
+		}
+		return nil, err
+	}
+	set := map[string]bool{}
+	for _, line := range strings.Split(string(b), "\n") {
+		if h := strings.TrimSpace(line); h != "" {
+			set[h] = true
+		}
+	}
+	return set, nil
+}
+
+// AddSeenReminders appends newly-emitted reminder hashes to the session's
+// sidecar (append-only, one hex hash per line). No-op for an empty slice.
+func (r *Reader) AddSeenReminders(sessionID string, hashes []string) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(r.cursorDir, 0o700); err != nil {
+		return err
+	}
+	path := filepath.Join(r.cursorDir, sessionID+".reminders")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(strings.Join(hashes, "\n") + "\n")
+	return err
 }
 
 func (r *Reader) readCursor(sessionID string) (int64, error) {
@@ -247,7 +294,16 @@ func parseLine(line []byte) []Block {
 	if err := json.Unmarshal(line, &e); err != nil {
 		return nil
 	}
-	if e.Type != "assistant" || len(e.Message) == 0 {
+	if len(e.Message) == 0 {
+		return nil
+	}
+	// User messages carry harness-injected <system-reminder> blocks (ADR 0005
+	// D3). They're the only thing we extract from the user side; everything
+	// else below is assistant content.
+	if e.Type == "user" {
+		return parseUserReminders(e.Message)
+	}
+	if e.Type != "assistant" {
 		return nil
 	}
 	var msg assistantMessage
@@ -360,6 +416,65 @@ func parseLine(line []byte) []Block {
 	}
 
 	return out
+}
+
+// parseUserReminders extracts <system-reminder> blocks from a user message,
+// one Block per reminder. Dedup (emit each distinct reminder once per session,
+// ADR 0005 D3) is the caller's job — it needs cross-invocation state the reader
+// doesn't hold. Fail-soft: unparseable content yields no blocks.
+func parseUserReminders(message json.RawMessage) []Block {
+	var msg struct {
+		ID      string          `json:"id"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(message, &msg); err != nil {
+		return nil
+	}
+	text := userContentText(msg.Content)
+	if text == "" {
+		return nil
+	}
+	var out []Block
+	for _, m := range reSystemReminder.FindAllStringSubmatch(text, -1) {
+		rem := strings.TrimSpace(m[1])
+		if rem == "" {
+			continue
+		}
+		out = append(out, Block{Kind: "system_reminder", Content: rem, MessageID: msg.ID})
+	}
+	return out
+}
+
+// userContentText flattens a user message's content to text. Content is either
+// a JSON string or an array of blocks; we concatenate the text blocks (where
+// the harness injects reminders). tool_result blocks are intentionally skipped
+// — reminders ride in text, and tool_result bodies are large and noisy.
+func userContentText(content json.RawMessage) string {
+	if len(content) == 0 {
+		return ""
+	}
+	switch content[0] {
+	case '"':
+		var s string
+		if err := json.Unmarshal(content, &s); err != nil {
+			return ""
+		}
+		return s
+	case '[':
+		var blocks []contentBlock
+		if err := json.Unmarshal(content, &blocks); err != nil {
+			return ""
+		}
+		var b strings.Builder
+		for _, blk := range blocks {
+			if blk.Type == "text" && blk.Text != "" {
+				b.WriteString(blk.Text)
+				b.WriteString("\n")
+			}
+		}
+		return b.String()
+	}
+	return ""
 }
 
 func trimSpace(b []byte) []byte {
