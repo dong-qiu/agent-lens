@@ -1,7 +1,9 @@
 # Agent Lens — 项目 SPEC
 
-> 版本：v0.6（2026-05-12）
+> 版本：v0.7（2026-05-30）
 > 状态：草案 / 规划阶段
+>
+> v0.7 变更：订阅 `SessionEnd` hook，给会话补显式闭边界（`decision.session_end` + `reason`）；`SessionStart` 增采 `source`（startup/resume/clear/compact）。详见 `docs/ADR/0012-session-end-hook.md`。
 >
 > v0.6 变更：把"agent 决策时所处配置"、"人对 agent 行为的反馈"、"context 在 turn 间的有损变换"分别升为头等事件，新增 EventKind `agent_config_snapshot` / `human_intervention` / `context_transform`。新增 Link.relation `intervenes`。新增 R8（compaction 启发式建模）。capture-time attestation 内联进配置快照，与事件 hash chain 同节点定锚。详见 `docs/ADR/0003-agent-config-snapshot.md` / `0004-human-intervention-events.md` / `0005-context-transform-events.md`。
 >
@@ -174,7 +176,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 ### 10.1 Claude Code（首发）
 
 **事件捕获路径**：
-- **Hook 直采**（`SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop` / `SubagentStart` / `SubagentStop`）：覆盖 prompt、工具调用与结果、会话/turn 边界、sub-agent 生命周期。`UserPromptSubmit` 中的系统注入块(后台任务完成的 `<task-notification>`、`<system-reminder>` 等)归 `actor=system` 并带 `payload.source`,不被当作人类 prompt(#118)。事件由 `agent-lens-hook claude` 子命令解析 stdin 并 POST 到 Ingest；Ingest 不可达时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink，供日后 `agent-lens replay`。
+- **Hook 直采**（`SessionStart` / `SessionEnd` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop` / `SubagentStart` / `SubagentStop`）：覆盖 prompt、工具调用与结果、会话/turn 边界、sub-agent 生命周期。`SessionStart` 派生 `decision.session_start`（含 `source`：startup/resume/clear/compact）、`SessionEnd` 派生 `decision.session_end`（含 `reason`：clear/resume/logout/prompt_input_exit/…），给会话显式闭边界；resume 续接按 `source`/`reason` 配对还原，崩溃 / 被 kill 时无 `session_end`、靠"未收尾"反推（详见 ADR 0012）。`UserPromptSubmit` 中的系统注入块(后台任务完成的 `<task-notification>`、`<system-reminder>` 等)归 `actor=system` 并带 `payload.source`,不被当作人类 prompt(#118)。事件由 `agent-lens-hook claude` 子命令解析 stdin 并 POST 到 Ingest；Ingest 不可达时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink，供日后 `agent-lens replay`。
 - **Transcript 旁路**（`Stop` 触发时）：读取 hook payload 的 `transcript_path`，对自上次 cursor 起新增的 jsonl 行做增量解析，提取每个 assistant 消息的 `thinking` 与 `text` content block：
   - `thinking` block → `EVENT_KIND_THOUGHT`
   - `text` block → `EVENT_KIND_DECISION`，payload.marker = `assistant_message`
@@ -283,6 +285,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 | R7 | 跨厂商 TokenUsage 可比性：OpenCode / Cursor / 自研 Agent 的 usage schema 不一致——尤其 cache 语义(Anthropic 是 TTL 分桶 + 写入按倍率,OpenAI 是缓存输入打折)无法用同一字段名表达。SDK 层定义最小公约数 `TokenUsage`(input / output 通用,cache 字段按需扩展),vendor 字段保留出处,聚合时按 vendor 分组而非强行求和。详见 ADR 0002 D2。 |
 | R8 | Compaction 与部分 context 变换在 §10.1 hook 路径仅能启发式探测，精确建模等 §10.4 代理深模式或 IDE 插件层。事件载体（`context_transform`）已就位，`loss_hint.confidence = inferred / observed` 标记区分，审计端不会被静默漏报。详见 ADR 0005 D5。 |
 | R9 | 「某 skill 的指令正文是否进入了某一轮 context」无法从 §10.1 hook 路径验证——hook 不暴露 system prompt / context 窗口，Claude Code 也没有 skill-load hook。可得的只有两个间接信号：skill 文件在磁盘上的存在性（ADR 0003 `agent_config_snapshot` config bundle 快照）与 skill 被**调用**（`Skill` 工具的 PreToolUse / PostToolUse，见 issue #101）。精确的「context 此刻含 skill X 指令」断言等 §10.4 代理深模式。审计端据此把 skill **可用性** 与 skill **调用** 分别建模，不假装能证明 context 成分。 |
+| R10 | `SessionEnd` 在进程崩溃 / 被 kill 时不发（hook 没机会运行）——会话闭边界靠「有 `session_start` 无对应 `session_end` 收尾」反推。正常退出（`reason=prompt_input_exit`）、`/clear`（`clear`）、会话内 `/resume` 切走（`resume`）均已实测发 `session_end`（2026-05-31 抓样）；同一 `session_id` 跨多次退出 / resume 续接可发**多条** `session_end`。详见 ADR 0012。 |
 
 ---
 

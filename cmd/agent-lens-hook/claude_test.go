@@ -284,6 +284,82 @@ func TestBuildEventsSubagentStartOmitsEmptyIDs(t *testing.T) {
 	}
 }
 
+func TestBuildEventsSessionEnd(t *testing.T) {
+	evs, commit := buildEvents(&claudeHookInput{
+		HookEventName: "SessionEnd",
+		SessionID:     "s1",
+		CWD:           "/repo",
+		Reason:        "logout",
+	})
+	if commit != nil {
+		t.Errorf("SessionEnd should not return a commit fn")
+	}
+	if len(evs) != 1 || evs[0]["kind"] != "decision" {
+		t.Fatalf("got %+v, want one decision event", evs)
+	}
+	ev := evs[0]
+	if actor := ev["actor"].(map[string]any); actor["type"] != "system" || actor["id"] != "claude-code" {
+		t.Errorf("actor = %v, want system/claude-code", actor)
+	}
+	p := ev["payload"].(map[string]any)
+	if p["marker"] != "session_end" {
+		t.Errorf("marker = %v, want session_end", p["marker"])
+	}
+	if p["reason"] != "logout" {
+		t.Errorf("reason = %v, want logout", p["reason"])
+	}
+	if p["cwd"] != "/repo" {
+		t.Errorf("cwd = %v, want /repo", p["cwd"])
+	}
+}
+
+func TestBuildEventsSessionEndOmitsEmptyReason(t *testing.T) {
+	// SessionEnd still emits the boundary marker without a reason; the
+	// optional key is omitted, not null.
+	evs, _ := buildEvents(&claudeHookInput{
+		HookEventName: "SessionEnd",
+		SessionID:     "s1",
+	})
+	p := evs[0]["payload"].(map[string]any)
+	if p["marker"] != "session_end" {
+		t.Errorf("marker = %v, want session_end", p["marker"])
+	}
+	if _, ok := p["reason"]; ok {
+		t.Errorf("reason present despite empty input: %+v", p)
+	}
+}
+
+func TestBuildEventsSessionStartCapturesSource(t *testing.T) {
+	evs, _ := buildEvents(&claudeHookInput{
+		HookEventName: "SessionStart",
+		SessionID:     "s1",
+		CWD:           "/repo",
+		Source:        "resume",
+	})
+	if len(evs) != 1 || evs[0]["kind"] != "decision" {
+		t.Fatalf("got %+v, want one decision event", evs)
+	}
+	p := evs[0]["payload"].(map[string]any)
+	if p["marker"] != "session_start" {
+		t.Errorf("marker = %v, want session_start", p["marker"])
+	}
+	if p["source"] != "resume" {
+		t.Errorf("source = %v, want resume", p["source"])
+	}
+}
+
+func TestBuildEventsSessionStartOmitsEmptySource(t *testing.T) {
+	evs, _ := buildEvents(&claudeHookInput{
+		HookEventName: "SessionStart",
+		SessionID:     "s1",
+		CWD:           "/repo",
+	})
+	p := evs[0]["payload"].(map[string]any)
+	if _, ok := p["source"]; ok {
+		t.Errorf("source present despite empty input: %+v", p)
+	}
+}
+
 func TestBuildEventsUnknown(t *testing.T) {
 	evs, _ := buildEvents(&claudeHookInput{HookEventName: "Mystery", SessionID: "s1"})
 	if len(evs) != 0 {
