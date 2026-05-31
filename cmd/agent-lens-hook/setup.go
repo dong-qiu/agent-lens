@@ -62,6 +62,7 @@ Exit codes: 0 success, 2 usage / IO / docker errors.
 // stop being captured silently.
 var setupHookEvents = []string{
 	"SessionStart",
+	"SessionEnd",
 	"UserPromptSubmit",
 	"PreToolUse",
 	"PostToolUse",

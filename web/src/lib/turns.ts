@@ -90,13 +90,14 @@ function isErrorResult(pl: Record<string, unknown>): boolean {
 
 // isMeaningfulStep excludes plumbing from the step count: tool_result (paired
 // with its call), the opening prompt (shown as the title), and the structural
-// session_start / turn_end decision markers.
+// session_start / session_end / turn_end decision markers.
 function isMeaningfulStep(e: Event): boolean {
   if (e.kind === "TOOL_RESULT" || e.kind === "PROMPT") return false;
   if (e.kind === "DECISION") {
     const pl = (e.payload ?? {}) as Record<string, unknown>;
     const m = asString(pl.marker);
-    if (m === "session_start" || m === "turn_end") return false;
+    if (m === "session_start" || m === "session_end" || m === "turn_end")
+      return false;
     // Empty assistant_message events are synthesized metadata carriers
     // (redacted-thinking / usage), not actions — same rule as the reply chip.
     if (m === "assistant_message" && asString(pl.text).trim() === "") return false;
@@ -201,7 +202,7 @@ export function summarizeTurn(turn: Turn): TurnSummary {
           bump("reply", "💬", "reply", e.id);
         else if (marker === "subagent_start")
           bump(`sub:${asString(pl.agent_type)}`, "🤖", asString(pl.agent_type) || "sub-agent", e.id);
-        break; // session_start / turn_end are structural — omit
+        break; // session_start / session_end / turn_end are structural — omit
       }
       case "REVIEW":
         bump(`review:${e.id}`, "👁", asString(pl.action) || "review", e.id);
