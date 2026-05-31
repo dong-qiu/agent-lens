@@ -66,7 +66,14 @@ var setupHookEvents = []string{
 	"UserPromptSubmit",
 	"PreToolUse",
 	"PostToolUse",
+	// PostToolUseFailure: a failed tool still ran — capture its tool_result and
+	// give the linker the "tool executed" signal for permission allow-pairing.
+	"PostToolUseFailure",
 	"Stop",
+	// Permission gates (ADR 0010): PermissionRequest = a human/classifier was
+	// asked to authorize a tool; PermissionDenied = auto-mode classifier deny.
+	"PermissionRequest",
+	"PermissionDenied",
 	// Sub-agent (Task tool) lifecycle. SubagentStart fires in the child
 	// session and carries agent_id — the child-side half of the parent→child
 	// bridge the linker needs for the `delegates` link (issue #85).
