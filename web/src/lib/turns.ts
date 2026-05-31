@@ -71,6 +71,56 @@ export interface TurnSummary {
 
 const asString = (v: unknown): string => (typeof v === "string" ? v : "");
 
+// A session episode boundary derived from the structural markers Claude Code
+// emits: SessionEnd (with `reason`) closes an episode; a non-startup
+// SessionStart (`source` = resume/clear/compact) opens one. Rendered as a
+// divider after the turn that carries the marker so a single session_id that
+// was resumed / cleared / compacted reads as distinct episodes rather than one
+// undifferentiated stream. The initial `startup` is the session's opening, not
+// a divider. ADR 0012, issue #126.
+export interface BoundaryMark {
+  tone: "end" | "start";
+  label: string;
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  resume: "resumed",
+  clear: "cleared — fresh context",
+  compact: "resumed after compaction",
+};
+
+// turnBoundaries extracts the session-episode dividers carried by a turn's own
+// events, in event order. groupIntoTurns folds the events that precede the next
+// prompt (a SessionEnd, then the resuming SessionStart) onto the *tail* of the
+// current turn, so every boundary marker sits at the end of its turn — callers
+// render these dividers *after* the turn card, which places them chronologically
+// between the closing episode and the next one. A turn can carry more than one
+// (close then reopen), hence a list.
+export function turnBoundaries(turn: Turn): BoundaryMark[] {
+  const marks: BoundaryMark[] = [];
+  for (const e of turn.events) {
+    if (e.kind !== "DECISION") continue;
+    const pl = (e.payload ?? {}) as Record<string, unknown>;
+    const marker = asString(pl.marker);
+    if (marker === "session_end") {
+      const reason = asString(pl.reason);
+      marks.push({
+        tone: "end",
+        label: reason ? `session ended · ${reason}` : "session ended",
+      });
+    } else if (marker === "session_start") {
+      const source = asString(pl.source);
+      if (source && source !== "startup") {
+        marks.push({
+          tone: "start",
+          label: SOURCE_LABEL[source] ?? `resumed · ${source}`,
+        });
+      }
+    }
+  }
+  return marks;
+}
+
 // Prompt classification (human vs system-injected block) is shared with the
 // EventCard via lib/prompts.ts.
 
