@@ -135,6 +135,7 @@ Patch 文件的硬性约束:
 - **0007 Sub-agent(Task 工具)透明度**(草案):父→子 `delegates` link 设计与开放问题。
 - **0008 Sub-agent 自动 link fallback**(草案):v0.1 K1 实证,撤回 `delegates`,落地 fallback。
 - **0009 Sub-agent 父→子自动链接(`delegates`)**(草案):SubagentStart.agent_id ↔ tool_result.agentId 桥接;v0.2 恢复 ADR 0007 D4 / 取代 ADR 0008 D3。
+- **0011 本地测试执行的采集**(Accepted):填 proto 既有但无产出方的 `test_run`;`PostToolUse`(Bash)首-token 识别派生,裁决均 `inferred`,不新增 EventKind。
 - **0012 订阅 SessionEnd 补齐会话边界**(Accepted):`SessionEnd` 派生 `decision.session_end`(`reason`)、`SessionStart` 增采 `source`;复用既有 `decision` marker,不新增 EventKind。(0010/0011/0013 草案见 PR #124。)
 
 (0003–0005 接受时的 `spec-patches-pending-0003-0005.md` 已随 #100 合入删除。)
