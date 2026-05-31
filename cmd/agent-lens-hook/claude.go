@@ -46,6 +46,10 @@ type claudeHookInput struct {
 	// carries reason (clear/resume/logout/prompt_input_exit/...). ADR 0012.
 	Source string `json:"source,omitempty"`
 	Reason string `json:"reason,omitempty"`
+	// PreCompact / PostCompact carry trigger (manual/auto); PreCompact also
+	// carries custom_instructions (what the user passed to /compact). ADR 0013.
+	Trigger            string `json:"trigger,omitempty"`
+	CustomInstructions string `json:"custom_instructions,omitempty"`
 }
 
 // runClaude reads a Claude Code hook payload on stdin and forwards a wire
@@ -116,8 +120,53 @@ func buildEvents(in *claudeHookInput) (events []map[string]any, commit func() er
 		return []map[string]any{makeSubagentLifecycle(in, "subagent_start")}, nil
 	case "SubagentStop":
 		return []map[string]any{makeSubagentLifecycle(in, "subagent_stop")}, nil
+	case "PreCompact":
+		return []map[string]any{makeCompaction(in, "provisional")}, nil
+	case "PostCompact":
+		return []map[string]any{makeCompaction(in, "observed")}, nil
 	}
 	return nil, nil
+}
+
+// makeCompaction captures a PreCompact (confidence=provisional, before the
+// compaction runs) or PostCompact (confidence=observed, after it completes)
+// hook as a context_transform.compaction event (ADR 0013). The two bracket one
+// compaction; a PreCompact with no matching PostCompact (process died mid-
+// compaction) stays provisional. triggered_by maps the trigger matcher; the
+// PreCompact's custom_instructions (what the user passed to /compact) is
+// captured through the redaction pipeline. Linker pairing into one logical
+// record + summary back-fill (ADR 0005 D2) are follow-ups.
+func makeCompaction(in *claudeHookInput, confidence string) map[string]any {
+	payload := map[string]any{
+		"sub_kind":     "compaction",
+		"triggered_by": compactionTrigger(in.Trigger),
+		"loss_hint":    map[string]any{"confidence": confidence},
+	}
+	if in.CustomInstructions != "" {
+		text, n := redactText(in.CustomInstructions)
+		before := map[string]any{"compact_instructions": text}
+		if n > 0 {
+			before["redacted_count"] = n
+		}
+		payload["before"] = before
+	}
+	return baseEvent(in, map[string]any{"type": "system", "id": "claude-code"}, "context_transform", payload)
+}
+
+// compactionTrigger maps the Claude Code trigger matcher to the ADR 0005 D1
+// triggered_by vocabulary. Unknown values pass through so an unexpected trigger
+// is recorded verbatim rather than silently mislabeled.
+func compactionTrigger(trigger string) string {
+	switch trigger {
+	case "manual":
+		return "user_explicit"
+	case "auto":
+		return "harness_auto"
+	case "":
+		return "harness_auto" // PostCompact / unspecified default
+	default:
+		return trigger
+	}
 }
 
 // makeSubagentLifecycle captures a Claude Code SubagentStart / SubagentStop

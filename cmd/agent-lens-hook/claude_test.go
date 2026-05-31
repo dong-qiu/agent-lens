@@ -585,3 +585,68 @@ func TestBuildEventsStopSystemReminderDedup(t *testing.T) {
 		t.Errorf("turn3 context_transform = %d, want 1 (distinct reminder)", got)
 	}
 }
+
+func TestBuildEventsPreCompact(t *testing.T) {
+	evs, commit := buildEvents(&claudeHookInput{
+		HookEventName:      "PreCompact",
+		SessionID:          "s1",
+		CWD:                "/repo",
+		Trigger:            "manual",
+		CustomInstructions: "keep the API design discussion",
+	})
+	if commit != nil {
+		t.Errorf("PreCompact should not return a commit fn")
+	}
+	if len(evs) != 1 || evs[0]["kind"] != "context_transform" {
+		t.Fatalf("got %+v, want one context_transform event", evs)
+	}
+	ev := evs[0]
+	if actor := ev["actor"].(map[string]any); actor["type"] != "system" {
+		t.Errorf("actor.type = %v, want system", actor["type"])
+	}
+	p := ev["payload"].(map[string]any)
+	if p["sub_kind"] != "compaction" {
+		t.Errorf("sub_kind = %v, want compaction", p["sub_kind"])
+	}
+	if p["triggered_by"] != "user_explicit" {
+		t.Errorf("triggered_by = %v, want user_explicit (manual)", p["triggered_by"])
+	}
+	if lh := p["loss_hint"].(map[string]any); lh["confidence"] != "provisional" {
+		t.Errorf("confidence = %v, want provisional", lh["confidence"])
+	}
+	before := p["before"].(map[string]any)
+	if before["compact_instructions"] != "keep the API design discussion" {
+		t.Errorf("compact_instructions = %v", before["compact_instructions"])
+	}
+}
+
+func TestBuildEventsPostCompactObserved(t *testing.T) {
+	evs, _ := buildEvents(&claudeHookInput{
+		HookEventName: "PostCompact",
+		SessionID:     "s1",
+		Trigger:       "auto",
+	})
+	if len(evs) != 1 || evs[0]["kind"] != "context_transform" {
+		t.Fatalf("got %+v, want one context_transform event", evs)
+	}
+	p := evs[0]["payload"].(map[string]any)
+	if lh := p["loss_hint"].(map[string]any); lh["confidence"] != "observed" {
+		t.Errorf("confidence = %v, want observed", lh["confidence"])
+	}
+	if p["triggered_by"] != "harness_auto" {
+		t.Errorf("triggered_by = %v, want harness_auto (auto)", p["triggered_by"])
+	}
+	// PostCompact carries no custom_instructions → no before block.
+	if _, ok := p["before"]; ok {
+		t.Errorf("PostCompact should have no before block: %+v", p)
+	}
+}
+
+func TestCompactionTriggerMapping(t *testing.T) {
+	cases := map[string]string{"manual": "user_explicit", "auto": "harness_auto", "": "harness_auto", "weird": "weird"}
+	for in, want := range cases {
+		if got := compactionTrigger(in); got != want {
+			t.Errorf("compactionTrigger(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
