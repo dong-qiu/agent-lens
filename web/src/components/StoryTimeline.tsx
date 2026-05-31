@@ -8,9 +8,11 @@ import {
   groupIntoTurns,
   summarizeTurn,
   formatDuration,
+  turnBoundaries,
   type Turn,
   type TurnSummary,
   type Initiator,
+  type BoundaryMark,
 } from "../lib/turns";
 
 // Per-initiator left-border colour + glyph: who drove the turn at a glance.
@@ -162,20 +164,54 @@ export function StoryTimeline({ sessionId }: { sessionId: string }) {
         <div className="text-sm text-zinc-500">No turns match the current filter.</div>
       ) : (
         <div className="space-y-3">
-          {rows.map(({ turn, summary, index }) => (
-            <TurnCard
-              key={turn.key}
-              turn={turn}
-              summary={summary}
-              index={index}
-              open={openKeys.has(turn.key)}
-              flashId={flashId}
-              onToggle={() => setOpen(turn.key, !openKeys.has(turn.key))}
-              onJumpTo={(eventId) => jumpTo(turn.key, eventId)}
-            />
-          ))}
+          {rows.map(({ turn, summary, index }) => {
+            const bounds = turnBoundaries(turn);
+            return (
+              <div key={turn.key} className="space-y-3">
+                {bounds
+                  .filter((b) => b.position === "before")
+                  .map((b, i) => (
+                    <SessionDivider key={`before-${i}`} mark={b} />
+                  ))}
+                <TurnCard
+                  turn={turn}
+                  summary={summary}
+                  index={index}
+                  open={openKeys.has(turn.key)}
+                  flashId={flashId}
+                  onToggle={() => setOpen(turn.key, !openKeys.has(turn.key))}
+                  onJumpTo={(eventId) => jumpTo(turn.key, eventId)}
+                />
+                {bounds
+                  .filter((b) => b.position === "after")
+                  .map((b, i) => (
+                    <SessionDivider key={`after-${i}`} mark={b} />
+                  ))}
+              </div>
+            );
+          })}
         </div>
       )}
+    </div>
+  );
+}
+
+// SessionDivider marks a session-episode boundary between turns — a closing
+// SessionEnd (grey) or a reopening resume/clear/compact SessionStart (amber) —
+// so a resumed/cleared session_id reads as distinct episodes. See ADR 0012.
+function SessionDivider({ mark }: { mark: BoundaryMark }) {
+  const isEnd = mark.tone === "end";
+  return (
+    <div className="flex items-center gap-2 py-0.5" role="separator" aria-label={mark.label}>
+      <span className="h-px flex-1 bg-zinc-200" />
+      <span
+        className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+          isEnd ? "bg-zinc-100 text-zinc-500" : "bg-amber-50 text-amber-700"
+        }`}
+      >
+        {isEnd ? "■" : "▸"} {mark.label}
+      </span>
+      <span className="h-px flex-1 bg-zinc-200" />
     </div>
   );
 }

@@ -71,6 +71,56 @@ export interface TurnSummary {
 
 const asString = (v: unknown): string => (typeof v === "string" ? v : "");
 
+// A session episode boundary derived from the structural markers Claude Code
+// emits: SessionEnd (with `reason`) closes an episode; a non-startup
+// SessionStart (`source` = resume/clear/compact) opens one. Rendered as a
+// divider between turns so a single session_id that was resumed / cleared /
+// compacted reads as distinct episodes rather than one undifferentiated
+// stream. The initial `startup` is the session's opening, not a divider.
+// ADR 0012, issue #126.
+export interface BoundaryMark {
+  position: "before" | "after";
+  tone: "end" | "start";
+  label: string;
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  resume: "resumed",
+  clear: "cleared — fresh context",
+  compact: "resumed after compaction",
+};
+
+// turnBoundaries extracts the session-episode dividers carried by a turn's
+// own events. A turn can carry more than one (e.g. ends then a later start),
+// so the result is ordered; callers render `before` marks above the turn card
+// and `after` marks below it.
+export function turnBoundaries(turn: Turn): BoundaryMark[] {
+  const marks: BoundaryMark[] = [];
+  for (const e of turn.events) {
+    if (e.kind !== "DECISION") continue;
+    const pl = (e.payload ?? {}) as Record<string, unknown>;
+    const marker = asString(pl.marker);
+    if (marker === "session_end") {
+      const reason = asString(pl.reason);
+      marks.push({
+        position: "after",
+        tone: "end",
+        label: reason ? `session ended · ${reason}` : "session ended",
+      });
+    } else if (marker === "session_start") {
+      const source = asString(pl.source);
+      if (source && source !== "startup") {
+        marks.push({
+          position: "before",
+          tone: "start",
+          label: SOURCE_LABEL[source] ?? `resumed · ${source}`,
+        });
+      }
+    }
+  }
+  return marks;
+}
+
 // Prompt classification (human vs system-injected block) is shared with the
 // EventCard via lib/prompts.ts.
 
