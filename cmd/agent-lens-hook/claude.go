@@ -95,7 +95,15 @@ func buildEvents(in *claudeHookInput) (events []map[string]any, commit func() er
 	case "PreToolUse":
 		return []map[string]any{makeToolCall(in)}, nil
 	case "PostToolUse":
-		return []map[string]any{makeToolResult(in)}, nil
+		evs := []map[string]any{makeToolResult(in)}
+		// A Bash command that ran a test suite additionally derives a
+		// `test_run` event, co-existing with the tool_result (ADR 0011).
+		if in.ToolName == "Bash" {
+			if tr := makeTestRun(in); tr != nil {
+				evs = append(evs, tr)
+			}
+		}
+		return evs, nil
 	case "SessionStart":
 		return []map[string]any{makeSessionStart(in)}, nil
 	case "SessionEnd":
