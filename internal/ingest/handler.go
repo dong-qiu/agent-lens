@@ -53,6 +53,11 @@ var validKinds = map[string]struct{}{
 	"review":      {},
 	"decision":    {},
 	"push":        {},
+	// v0.6 EventKinds (ADR 0003/0004/0005). Schema landed in Phase 0; producers
+	// land incrementally per their ADRs. agent_config_snapshot (0003) follows
+	// when its producer lands.
+	"human_intervention": {},
+	"context_transform":  {},
 }
 
 // Handler owns the per-session head-hash cache and is the single writer
