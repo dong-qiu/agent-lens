@@ -9,8 +9,49 @@ import (
 	"testing"
 )
 
-// TestMergeAgentLensHooksFreshFile: empty / missing settings.json → all
-// 5 events get our hook entry, no other keys appear.
+// TestSettingsExampleCoversAllHookEvents guards against
+// .claude/settings.example.json drifting behind setupHookEvents — the drift
+// that left SessionEnd / SubagentStart / SubagentStop uncaptured for dogfood
+// installs (issue #126). install-dogfood.sh copies this static example, so
+// every event the `setup` command would register must also appear here.
+func TestSettingsExampleCoversAllHookEvents(t *testing.T) {
+	path := filepath.Join("..", "..", ".claude", "settings.example.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var cfg struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	for _, ev := range setupHookEvents {
+		matchers, ok := cfg.Hooks[ev]
+		if !ok || len(matchers) == 0 {
+			t.Errorf("settings.example.json missing hook event %q (it is in setupHookEvents)", ev)
+			continue
+		}
+		wired := false
+		for _, m := range matchers {
+			for _, h := range m.Hooks {
+				if strings.Contains(h.Command, "agent-lens-hook") {
+					wired = true
+				}
+			}
+		}
+		if !wired {
+			t.Errorf("event %q present in example but no agent-lens-hook command wired", ev)
+		}
+	}
+}
+
+// TestMergeAgentLensHooksFreshFile: empty / missing settings.json → every
+// setupHookEvents event gets our hook entry, no other keys appear.
 func TestMergeAgentLensHooksFreshFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
