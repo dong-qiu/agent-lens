@@ -92,8 +92,8 @@ const (
 	EventKind_EVENT_KIND_REVIEW             EventKind = 11
 	EventKind_EVENT_KIND_DECISION           EventKind = 12
 	EventKind_EVENT_KIND_PUSH               EventKind = 13
-	EventKind_EVENT_KIND_HUMAN_INTERVENTION EventKind = 14 // ADR 0004 — 人对 agent 行为的反馈(permission/interrupt/review…)
-	EventKind_EVENT_KIND_CONTEXT_TRANSFORM  EventKind = 15 // ADR 0005 — turn 间 context 的有损变换(compaction/truncation/reminder)
+	EventKind_EVENT_KIND_HUMAN_INTERVENTION EventKind = 14 // ADR 0004 — human feedback on agent actions (permission/interrupt/review…)
+	EventKind_EVENT_KIND_CONTEXT_TRANSFORM  EventKind = 15 // ADR 0005 — lossy context transforms between turns (compaction/truncation/reminder)
 )
 
 // Enum value maps for EventKind.
