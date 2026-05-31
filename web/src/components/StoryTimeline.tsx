@@ -272,7 +272,9 @@ function TurnCard({
             </span>
             <span aria-hidden>→</span>
             <span>🤖 {s.model ?? "agent"}</span>
-            <span className="text-zinc-400">· {s.steps} steps</span>
+            <span className="text-zinc-400">
+              · {s.steps} {s.steps === 1 ? "step" : "steps"}
+            </span>
             {s.durationMs != null && (
               <span className="text-zinc-400">· {formatDuration(s.durationMs)}</span>
             )}
