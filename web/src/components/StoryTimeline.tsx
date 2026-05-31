@@ -168,11 +168,6 @@ export function StoryTimeline({ sessionId }: { sessionId: string }) {
             const bounds = turnBoundaries(turn);
             return (
               <div key={turn.key} className="space-y-3">
-                {bounds
-                  .filter((b) => b.position === "before")
-                  .map((b, i) => (
-                    <SessionDivider key={`before-${i}`} mark={b} />
-                  ))}
                 <TurnCard
                   turn={turn}
                   summary={summary}
@@ -182,11 +177,9 @@ export function StoryTimeline({ sessionId }: { sessionId: string }) {
                   onToggle={() => setOpen(turn.key, !openKeys.has(turn.key))}
                   onJumpTo={(eventId) => jumpTo(turn.key, eventId)}
                 />
-                {bounds
-                  .filter((b) => b.position === "after")
-                  .map((b, i) => (
-                    <SessionDivider key={`after-${i}`} mark={b} />
-                  ))}
+                {bounds.map((b, i) => (
+                  <SessionDivider key={`bound-${i}`} mark={b} />
+                ))}
               </div>
             );
           })}
