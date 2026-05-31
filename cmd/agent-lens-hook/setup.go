@@ -72,6 +72,10 @@ var setupHookEvents = []string{
 	// bridge the linker needs for the `delegates` link (issue #85).
 	"SubagentStart",
 	"SubagentStop",
+	// Compaction boundary (ADR 0013): PreCompact (before) + PostCompact (after)
+	// bracket a context compaction into a `context_transform` event.
+	"PreCompact",
+	"PostCompact",
 }
 
 func runSetup(args []string) {
