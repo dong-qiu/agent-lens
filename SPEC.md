@@ -1,7 +1,9 @@
 # Agent Lens — 项目 SPEC
 
-> 版本：v0.8（2026-05-31）
+> 版本：v0.9（2026-06-01）
 > 状态：草案 / 规划阶段
+>
+> v0.9 变更：订阅 `PreCompact` / `PostCompact` hook，把 compaction 从启发式 inferred 提到一手 observed——`PreCompact` 发 `context_transform.compaction`（`confidence=provisional`、`triggered_by`、`before.compact_instructions`），`PostCompact` 确认升 `observed`；进程崩溃则停在 `provisional`。`loss_hint.confidence` 集合增 `provisional` 档。详见 `docs/ADR/0013-precompact-context-transform.md`。
 >
 > v0.8 变更：填上 `test_run` EventKind 的空产出方——`PostToolUse`(Bash)首-token 识别本地测试命令派生 `test_run`，结果可解析时带 pass/fail/计数、否则仅 ran，裁决一律 `confidence=inferred`。详见 `docs/ADR/0011-local-test-run-capture.md`。
 >
@@ -188,7 +190,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 - 可选 MCP server，把 Lens 查询能力反哺给 Agent。
 - **配置快照**（SessionStart + 配置漂移）：每次 SessionStart 起一条 `agent_config_snapshot` 事件，bundle 内容走 artifact store。`UserPromptSubmit` / `PreToolUse` 时若指令文件 / settings hash 漂移，补发新快照。`hook_binary_sha256` 在 SessionStart 算一次，与 bundle 同事件入 hash chain，作为 capture-time attestation。详见 ADR 0003。
 - **人工干预**（PreToolUse 派生 + Stop 启发式 + GitHub webhook 派生）：`PreToolUse` permission decision 派生 `human_intervention.permission_decision`（与 tool_call 共存，via `target_event_id` 链回）；`Stop` 时按 `stop_reason == null` 且无后续 tool_result 启发式推断 `interrupt`；GitHub `pull_request_review` handler 派生 `review_decision`，merge 事件回扫 request_changes 状态派生 `merge_override`。详见 ADR 0004 D2 / D3 / D5。
-- **上下文变换**（transcript 解析 + PostToolUse 截断检测）：transcript 解析新增识别 compaction（降级为启发式）、system reminder 注入（以 hash 去重发首次）；PostToolUse 检测 tool_result 截断占位符并发 `context_transform.truncation`。详见 ADR 0005 D3 / D4 / D5。
+- **上下文变换**（`PreCompact`/`PostCompact` hook + transcript 解析）：`PreCompact` 派生 `context_transform.compaction`（`confidence=provisional`、`triggered_by`、`before.compact_instructions` 过脱敏），`PostCompact` 确认升 `observed`、崩溃停 `provisional`（ADR 0013，取代 0005 D5 的 token-budget 启发式为主路径——后者降为两 hook 未触发时的 fallback）；`system reminder 注入` 由 transcript 解析按 hash 去重发首次（ADR 0005 D3，已落地）。`truncation`（0005 D4）暂缓——本仓自指内容致字符串匹配假阳，待锚定 harness 截断标记契约。详见 ADR 0005 / 0013。
 - **测试执行**（PostToolUse Bash 识别）：`PostToolUse` 时对 `Bash` 命令做首-token 识别（剥 `cd &&`/`env`/`sudo`/`npx`/`bash -c` 等包装器与启动器、拒绝 `echo`/`cat`/`grep` 等假阳），命中测试运行器则派生 `test_run` 事件（与 `tool_result` 共存）；能解析 exit/stdout 时带 pass/fail/计数、否则仅 `ran` + `exit_code`，裁决一律 `confidence=inferred`（本地路径无 observed 级）。`command` 姿态随 `tool_result`（verbatim）。详见 ADR 0011。
 
 **Thinking 捕获条件**：仅当 Claude Code 在该轮启用了 extended thinking，transcript 中才会有 `thinking` block 可读。本路径不主动开启该选项，也不强制其存在。
@@ -200,7 +202,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 - `<synthetic>` 模型标记的消息（Claude Code 自身注入的 stop-sequence 占位，usage 全 0）按已知形态跳过 usage 提取，不报错、不丢消息体。
 - **思考内容（thinking 文本）**：Claude Code 写 transcript 时只保留 `signature` 字段，**原文不持久化**。§10.1 拿不到原文。每条 assistant 消息中被丢弃的 thinking 块**数量**显式记录在派生 DECISION 事件的 `payload.thinking_redacted_by_claude_code`，避免审计报告把"被吞"误读为"无思考"。要拿原文得走 §10.4。
 - **工具空间与采样参数**：本轮可用工具集合（active MCP server、tool catalog）、permission mode 即时值、thinking budget、temperature 等 model_params 在 hook 路径不可得。`agent_config_snapshot` 事件中这两块字段标 `null` 并在 metadata 列入 `unknown_fields`，审计端能区分"工具空间为空" vs "采集路径看不到"。要拿到这些得走 §10.4。详见 ADR 0003 D4。
-- **Compaction 边界**：harness 自动 compaction 在 transcript 里是否显式标记**未经系统验证**，首版按 token-budget 启发式推断，生成 `context_transform.compaction` 事件并置 `loss_hint.confidence = "inferred"`。验证通过则 confidence 升到 `observed`；Truncation 与 system reminder 注入在 transcript 中可见，直接观测。详见 ADR 0005 D5。
+- **Compaction 边界**：`PreCompact`/`PostCompact` hook 给 compaction 一手锚点——`PreCompact` 标 `provisional`、`PostCompact` 确认 `observed`、进程崩溃停 `provisional`（"开始过、未确认完成"，镜像 `SessionEnd` 崩溃缺口）。token-budget 启发式（`inferred`）降为两 hook 未触发/未装时的 fallback。仍待 §10.4 的：compaction **summary 文本**的精确捕获（本路径只锚前后时点 + 触发者，内容仍由 transcript 旁路补采）。详见 ADR 0013 / 0005 D5。
 - **手工编辑归因**：agent 改完代码 → 人手在 IDE 微调 → commit 这条混合贡献路径，在 §10.1 路径不可还原。`HumanIntervention.manual_edit` 与 `code_change.contributor_mix` 字段位预留，等 IDE 插件层（M4+）。详见 ADR 0004 D4。
 - 仍**没有**的能力：实时拦截 / token 流式即时反馈 / policy gate。要这些得走 §10.4。
 - **Sub-agent 派发**（Agent 工具）：父侧 tool_call/result 完整捕获（含 `response.agentId` 等元数据，UI 显式 surface）。子 session 在 user-global hook 装好（`agent-lens-hook setup --personal`）的前提下以独立 UUID session 捕获；`SubagentStart` / `SubagentStop` 生命周期事件以 `decision` marker 捕获，子侧带 `agent_id`，构成父→子桥接的子侧一半（预期与父侧 `tool_result.response.agentId` 配对——待 v0.2 实证）。自动 emit `delegates` link（含 `RELATION_DELEGATES` schema）仍留 v0.2，详见 ADR 0008 与追踪 issue #85。在此之前 audit reader 通过 timestamp + prompt 文本人眼对应。
@@ -286,7 +288,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 | R5 | 与现有 OpenTelemetry-GenAI / Langfuse 等观测系统的关系：互补还是重叠？ |
 | R6 | attestation 的密钥管理：自托管下用本地 KMS 还是 Sigstore（需外网）？ |
 | R7 | 跨厂商 TokenUsage 可比性：OpenCode / Cursor / 自研 Agent 的 usage schema 不一致——尤其 cache 语义(Anthropic 是 TTL 分桶 + 写入按倍率,OpenAI 是缓存输入打折)无法用同一字段名表达。SDK 层定义最小公约数 `TokenUsage`(input / output 通用,cache 字段按需扩展),vendor 字段保留出处,聚合时按 vendor 分组而非强行求和。详见 ADR 0002 D2。 |
-| R8 | Compaction 与部分 context 变换在 §10.1 hook 路径仅能启发式探测，精确建模等 §10.4 代理深模式或 IDE 插件层。事件载体（`context_transform`）已就位，`loss_hint.confidence = inferred / observed` 标记区分，审计端不会被静默漏报。详见 ADR 0005 D5。 |
+| R8 | Compaction **触发**已由 `PreCompact`/`PostCompact` hook 一手 observed（ADR 0013）；剩余缺口收窄为:(a) compaction **summary 文本**的精确捕获仍部分依赖 transcript 旁路 / §10.4;(b) 两 hook 未触发/未装时回落 token-budget 启发式（`inferred`);(c) `PreCompact` 无配对 `PostCompact` 时停 `provisional`（开始未确认）。`truncation`（0005 D4）暂未落地。`loss_hint.confidence = provisional / observed / inferred` 三档对审计端显式区分,不静默漏报。详见 ADR 0013 / 0005 D5。 |
 | R9 | 「某 skill 的指令正文是否进入了某一轮 context」无法从 §10.1 hook 路径验证——hook 不暴露 system prompt / context 窗口，Claude Code 也没有 skill-load hook。可得的只有两个间接信号：skill 文件在磁盘上的存在性（ADR 0003 `agent_config_snapshot` config bundle 快照）与 skill 被**调用**（`Skill` 工具的 PreToolUse / PostToolUse，见 issue #101）。精确的「context 此刻含 skill X 指令」断言等 §10.4 代理深模式。审计端据此把 skill **可用性** 与 skill **调用** 分别建模，不假装能证明 context 成分。 |
 | R10 | `SessionEnd` 在进程崩溃 / 被 kill 时不发（hook 没机会运行）——会话闭边界靠「有 `session_start` 无对应 `session_end` 收尾」反推。正常退出（`reason=prompt_input_exit`）、`/clear`（`clear`）、会话内 `/resume` 切走（`resume`）均已实测发 `session_end`（2026-05-31 抓样）；同一 `session_id` 跨多次退出 / resume 续接可发**多条** `session_end`。详见 ADR 0012。 |
 | R11 | 本地 `test_run`（ADR 0011）裁决**一律 `inferred`**：首-token 识别可能漏冷门 runner（`./run-tests.sh`/`tox`/`gradle test` 等→静默欠计，「无 `test_run`」≠「没跑测试」）、exit code 可能被管道 / `tee` / `; echo` 掩盖（解析错位），且看不进 Makefile / 脚本内部（`make test` 实跑 lint→伪 pass）。审计端不得把本地 `test_run` 当 observed 真值；observed 级留给 wrapper-CLI 后续路径。 |

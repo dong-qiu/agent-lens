@@ -1,6 +1,6 @@
 # ADR 0005:把 context 变换升为头等事件
 
-- 状态:Accepted
+- 状态:Accepted — `loss_hint.confidence` 集合由 ADR 0013 增 `provisional` 档(compaction 经 `PreCompact` 触发、`PostCompact` 未确认时);compaction 采集主路径由 0013 的 `PreCompact`/`PostCompact` 取代 D5 的 token-budget 启发式(后者降为 fallback)。
 - 日期:2026-05-12
 - 取代:—
 - 修订:SPEC §5、§7、§10.1、§15、§17
