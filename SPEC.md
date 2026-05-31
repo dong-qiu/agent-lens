@@ -1,7 +1,9 @@
 # Agent Lens — 项目 SPEC
 
-> 版本：v0.7（2026-05-30）
+> 版本：v0.8（2026-05-31）
 > 状态：草案 / 规划阶段
+>
+> v0.8 变更：填上 `test_run` EventKind 的空产出方——`PostToolUse`(Bash)首-token 识别本地测试命令派生 `test_run`，结果可解析时带 pass/fail/计数、否则仅 ran，裁决一律 `confidence=inferred`。详见 `docs/ADR/0011-local-test-run-capture.md`。
 >
 > v0.7 变更：订阅 `SessionEnd` hook，给会话补显式闭边界（`decision.session_end` + `reason`）；`SessionStart` 增采 `source`（startup/resume/clear/compact）。详见 `docs/ADR/0012-session-end-hook.md`。
 >
@@ -187,6 +189,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 - **配置快照**（SessionStart + 配置漂移）：每次 SessionStart 起一条 `agent_config_snapshot` 事件，bundle 内容走 artifact store。`UserPromptSubmit` / `PreToolUse` 时若指令文件 / settings hash 漂移，补发新快照。`hook_binary_sha256` 在 SessionStart 算一次，与 bundle 同事件入 hash chain，作为 capture-time attestation。详见 ADR 0003。
 - **人工干预**（PreToolUse 派生 + Stop 启发式 + GitHub webhook 派生）：`PreToolUse` permission decision 派生 `human_intervention.permission_decision`（与 tool_call 共存，via `target_event_id` 链回）；`Stop` 时按 `stop_reason == null` 且无后续 tool_result 启发式推断 `interrupt`；GitHub `pull_request_review` handler 派生 `review_decision`，merge 事件回扫 request_changes 状态派生 `merge_override`。详见 ADR 0004 D2 / D3 / D5。
 - **上下文变换**（transcript 解析 + PostToolUse 截断检测）：transcript 解析新增识别 compaction（降级为启发式）、system reminder 注入（以 hash 去重发首次）；PostToolUse 检测 tool_result 截断占位符并发 `context_transform.truncation`。详见 ADR 0005 D3 / D4 / D5。
+- **测试执行**（PostToolUse Bash 识别）：`PostToolUse` 时对 `Bash` 命令做首-token 识别（剥 `cd &&`/`env`/`sudo`/`npx`/`bash -c` 等包装器与启动器、拒绝 `echo`/`cat`/`grep` 等假阳），命中测试运行器则派生 `test_run` 事件（与 `tool_result` 共存）；能解析 exit/stdout 时带 pass/fail/计数、否则仅 `ran` + `exit_code`，裁决一律 `confidence=inferred`（本地路径无 observed 级）。`command` 姿态随 `tool_result`（verbatim）。详见 ADR 0011。
 
 **Thinking 捕获条件**：仅当 Claude Code 在该轮启用了 extended thinking，transcript 中才会有 `thinking` block 可读。本路径不主动开启该选项，也不强制其存在。
 
@@ -286,6 +289,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 | R8 | Compaction 与部分 context 变换在 §10.1 hook 路径仅能启发式探测，精确建模等 §10.4 代理深模式或 IDE 插件层。事件载体（`context_transform`）已就位，`loss_hint.confidence = inferred / observed` 标记区分，审计端不会被静默漏报。详见 ADR 0005 D5。 |
 | R9 | 「某 skill 的指令正文是否进入了某一轮 context」无法从 §10.1 hook 路径验证——hook 不暴露 system prompt / context 窗口，Claude Code 也没有 skill-load hook。可得的只有两个间接信号：skill 文件在磁盘上的存在性（ADR 0003 `agent_config_snapshot` config bundle 快照）与 skill 被**调用**（`Skill` 工具的 PreToolUse / PostToolUse，见 issue #101）。精确的「context 此刻含 skill X 指令」断言等 §10.4 代理深模式。审计端据此把 skill **可用性** 与 skill **调用** 分别建模，不假装能证明 context 成分。 |
 | R10 | `SessionEnd` 在进程崩溃 / 被 kill 时不发（hook 没机会运行）——会话闭边界靠「有 `session_start` 无对应 `session_end` 收尾」反推。正常退出（`reason=prompt_input_exit`）、`/clear`（`clear`）、会话内 `/resume` 切走（`resume`）均已实测发 `session_end`（2026-05-31 抓样）；同一 `session_id` 跨多次退出 / resume 续接可发**多条** `session_end`。详见 ADR 0012。 |
+| R11 | 本地 `test_run`（ADR 0011）裁决**一律 `inferred`**：首-token 识别可能漏冷门 runner（`./run-tests.sh`/`tox`/`gradle test` 等→静默欠计，「无 `test_run`」≠「没跑测试」）、exit code 可能被管道 / `tee` / `; echo` 掩盖（解析错位），且看不进 Makefile / 脚本内部（`make test` 实跑 lint→伪 pass）。审计端不得把本地 `test_run` 当 observed 真值；observed 级留给 wrapper-CLI 后续路径。 |
 
 ---
 
