@@ -52,4 +52,6 @@ enum EventKind {
   EVENT_KIND_REVIEW = 11;
   EVENT_KIND_DECISION = 12;
   EVENT_KIND_PUSH = 13;
+  EVENT_KIND_HUMAN_INTERVENTION = 14;  // ADR 0004 — human feedback on agent actions (permission/interrupt/review…)
+  EVENT_KIND_CONTEXT_TRANSFORM = 15;   // ADR 0005 — lossy context transforms between turns (compaction/truncation/reminder)
 }

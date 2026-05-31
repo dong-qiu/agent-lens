@@ -93,6 +93,8 @@ enum EventKind {
   REVIEW
   DECISION
   PUSH
+  HUMAN_INTERVENTION
+  CONTEXT_TRANSFORM
 }
 
 """Aggregated view of a session: id plus first/last activity and event count."""

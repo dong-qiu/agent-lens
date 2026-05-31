@@ -78,20 +78,22 @@ func (ActorType) EnumDescriptor() ([]byte, []int) {
 type EventKind int32
 
 const (
-	EventKind_EVENT_KIND_UNSPECIFIED EventKind = 0
-	EventKind_EVENT_KIND_PROMPT      EventKind = 1
-	EventKind_EVENT_KIND_THOUGHT     EventKind = 2
-	EventKind_EVENT_KIND_TOOL_CALL   EventKind = 3
-	EventKind_EVENT_KIND_TOOL_RESULT EventKind = 4
-	EventKind_EVENT_KIND_CODE_CHANGE EventKind = 5
-	EventKind_EVENT_KIND_COMMIT      EventKind = 6
-	EventKind_EVENT_KIND_PR          EventKind = 7
-	EventKind_EVENT_KIND_TEST_RUN    EventKind = 8
-	EventKind_EVENT_KIND_BUILD       EventKind = 9
-	EventKind_EVENT_KIND_DEPLOY      EventKind = 10
-	EventKind_EVENT_KIND_REVIEW      EventKind = 11
-	EventKind_EVENT_KIND_DECISION    EventKind = 12
-	EventKind_EVENT_KIND_PUSH        EventKind = 13
+	EventKind_EVENT_KIND_UNSPECIFIED        EventKind = 0
+	EventKind_EVENT_KIND_PROMPT             EventKind = 1
+	EventKind_EVENT_KIND_THOUGHT            EventKind = 2
+	EventKind_EVENT_KIND_TOOL_CALL          EventKind = 3
+	EventKind_EVENT_KIND_TOOL_RESULT        EventKind = 4
+	EventKind_EVENT_KIND_CODE_CHANGE        EventKind = 5
+	EventKind_EVENT_KIND_COMMIT             EventKind = 6
+	EventKind_EVENT_KIND_PR                 EventKind = 7
+	EventKind_EVENT_KIND_TEST_RUN           EventKind = 8
+	EventKind_EVENT_KIND_BUILD              EventKind = 9
+	EventKind_EVENT_KIND_DEPLOY             EventKind = 10
+	EventKind_EVENT_KIND_REVIEW             EventKind = 11
+	EventKind_EVENT_KIND_DECISION           EventKind = 12
+	EventKind_EVENT_KIND_PUSH               EventKind = 13
+	EventKind_EVENT_KIND_HUMAN_INTERVENTION EventKind = 14 // ADR 0004 — human feedback on agent actions (permission/interrupt/review…)
+	EventKind_EVENT_KIND_CONTEXT_TRANSFORM  EventKind = 15 // ADR 0005 — lossy context transforms between turns (compaction/truncation/reminder)
 )
 
 // Enum value maps for EventKind.
@@ -111,22 +113,26 @@ var (
 		11: "EVENT_KIND_REVIEW",
 		12: "EVENT_KIND_DECISION",
 		13: "EVENT_KIND_PUSH",
+		14: "EVENT_KIND_HUMAN_INTERVENTION",
+		15: "EVENT_KIND_CONTEXT_TRANSFORM",
 	}
 	EventKind_value = map[string]int32{
-		"EVENT_KIND_UNSPECIFIED": 0,
-		"EVENT_KIND_PROMPT":      1,
-		"EVENT_KIND_THOUGHT":     2,
-		"EVENT_KIND_TOOL_CALL":   3,
-		"EVENT_KIND_TOOL_RESULT": 4,
-		"EVENT_KIND_CODE_CHANGE": 5,
-		"EVENT_KIND_COMMIT":      6,
-		"EVENT_KIND_PR":          7,
-		"EVENT_KIND_TEST_RUN":    8,
-		"EVENT_KIND_BUILD":       9,
-		"EVENT_KIND_DEPLOY":      10,
-		"EVENT_KIND_REVIEW":      11,
-		"EVENT_KIND_DECISION":    12,
-		"EVENT_KIND_PUSH":        13,
+		"EVENT_KIND_UNSPECIFIED":        0,
+		"EVENT_KIND_PROMPT":             1,
+		"EVENT_KIND_THOUGHT":            2,
+		"EVENT_KIND_TOOL_CALL":          3,
+		"EVENT_KIND_TOOL_RESULT":        4,
+		"EVENT_KIND_CODE_CHANGE":        5,
+		"EVENT_KIND_COMMIT":             6,
+		"EVENT_KIND_PR":                 7,
+		"EVENT_KIND_TEST_RUN":           8,
+		"EVENT_KIND_BUILD":              9,
+		"EVENT_KIND_DEPLOY":             10,
+		"EVENT_KIND_REVIEW":             11,
+		"EVENT_KIND_DECISION":           12,
+		"EVENT_KIND_PUSH":               13,
+		"EVENT_KIND_HUMAN_INTERVENTION": 14,
+		"EVENT_KIND_CONTEXT_TRANSFORM":  15,
 	}
 )
 
@@ -379,7 +385,7 @@ const file_event_proto_rawDesc = "" +
 	"\x16ACTOR_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10ACTOR_TYPE_HUMAN\x10\x01\x12\x14\n" +
 	"\x10ACTOR_TYPE_AGENT\x10\x02\x12\x15\n" +
-	"\x11ACTOR_TYPE_SYSTEM\x10\x03*\xdd\x02\n" +
+	"\x11ACTOR_TYPE_SYSTEM\x10\x03*\xa2\x03\n" +
 	"\tEventKind\x12\x1a\n" +
 	"\x16EVENT_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11EVENT_KIND_PROMPT\x10\x01\x12\x16\n" +
@@ -395,7 +401,9 @@ const file_event_proto_rawDesc = "" +
 	"\x12\x15\n" +
 	"\x11EVENT_KIND_REVIEW\x10\v\x12\x17\n" +
 	"\x13EVENT_KIND_DECISION\x10\f\x12\x13\n" +
-	"\x0fEVENT_KIND_PUSH\x10\rB/Z-github.com/dong-qiu/agent-lens/internal/pb;pbb\x06proto3"
+	"\x0fEVENT_KIND_PUSH\x10\r\x12!\n" +
+	"\x1dEVENT_KIND_HUMAN_INTERVENTION\x10\x0e\x12 \n" +
+	"\x1cEVENT_KIND_CONTEXT_TRANSFORM\x10\x0fB/Z-github.com/dong-qiu/agent-lens/internal/pb;pbb\x06proto3"
 
 var (
 	file_event_proto_rawDescOnce sync.Once

@@ -155,19 +155,21 @@ func (e ActorType) MarshalJSON() ([]byte, error) {
 type EventKind string
 
 const (
-	EventKindPrompt     EventKind = "PROMPT"
-	EventKindThought    EventKind = "THOUGHT"
-	EventKindToolCall   EventKind = "TOOL_CALL"
-	EventKindToolResult EventKind = "TOOL_RESULT"
-	EventKindCodeChange EventKind = "CODE_CHANGE"
-	EventKindCommit     EventKind = "COMMIT"
-	EventKindPr         EventKind = "PR"
-	EventKindTestRun    EventKind = "TEST_RUN"
-	EventKindBuild      EventKind = "BUILD"
-	EventKindDeploy     EventKind = "DEPLOY"
-	EventKindReview     EventKind = "REVIEW"
-	EventKindDecision   EventKind = "DECISION"
-	EventKindPush       EventKind = "PUSH"
+	EventKindPrompt            EventKind = "PROMPT"
+	EventKindThought           EventKind = "THOUGHT"
+	EventKindToolCall          EventKind = "TOOL_CALL"
+	EventKindToolResult        EventKind = "TOOL_RESULT"
+	EventKindCodeChange        EventKind = "CODE_CHANGE"
+	EventKindCommit            EventKind = "COMMIT"
+	EventKindPr                EventKind = "PR"
+	EventKindTestRun           EventKind = "TEST_RUN"
+	EventKindBuild             EventKind = "BUILD"
+	EventKindDeploy            EventKind = "DEPLOY"
+	EventKindReview            EventKind = "REVIEW"
+	EventKindDecision          EventKind = "DECISION"
+	EventKindPush              EventKind = "PUSH"
+	EventKindHumanIntervention EventKind = "HUMAN_INTERVENTION"
+	EventKindContextTransform  EventKind = "CONTEXT_TRANSFORM"
 )
 
 var AllEventKind = []EventKind{
@@ -184,11 +186,13 @@ var AllEventKind = []EventKind{
 	EventKindReview,
 	EventKindDecision,
 	EventKindPush,
+	EventKindHumanIntervention,
+	EventKindContextTransform,
 }
 
 func (e EventKind) IsValid() bool {
 	switch e {
-	case EventKindPrompt, EventKindThought, EventKindToolCall, EventKindToolResult, EventKindCodeChange, EventKindCommit, EventKindPr, EventKindTestRun, EventKindBuild, EventKindDeploy, EventKindReview, EventKindDecision, EventKindPush:
+	case EventKindPrompt, EventKindThought, EventKindToolCall, EventKindToolResult, EventKindCodeChange, EventKindCommit, EventKindPr, EventKindTestRun, EventKindBuild, EventKindDeploy, EventKindReview, EventKindDecision, EventKindPush, EventKindHumanIntervention, EventKindContextTransform:
 		return true
 	}
 	return false
