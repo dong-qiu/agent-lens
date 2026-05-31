@@ -1,7 +1,9 @@
 # Agent Lens — 项目 SPEC
 
-> 版本：v0.9（2026-06-01）
+> 版本：v0.10（2026-06-01）
 > 状态：草案 / 规划阶段
+>
+> v0.10 变更：给 `human_intervention` 第一个产出方——订阅 `PermissionRequest`（→ `permission_decision` 记权限 gate 出现，一手证据）、`PermissionDenied`（→ `decision=deny` auto 拒绝，observed）、`PostToolUseFailure`（→ `tool_result` 补齐失败工具）。`permission_mode` 入 `tool_call.authorization`。修正 0004 D2 的 `PreToolUse` 来源声明、给 `decision` 集合增 `unresolved`。allow/unresolved 的关联判定留 linker 后续。详见 `docs/ADR/0010-permission-capture.md`。
 >
 > v0.9 变更：订阅 `PreCompact` / `PostCompact` hook，把 compaction 从启发式 inferred 提到一手 observed——`PreCompact` 发 `context_transform.compaction`（`confidence=provisional`、`triggered_by`、`before.compact_instructions`），`PostCompact` 确认升 `observed`；进程崩溃则停在 `provisional`。`loss_hint.confidence` 集合增 `provisional` 档。详见 `docs/ADR/0013-precompact-context-transform.md`。
 >
@@ -180,7 +182,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 ### 10.1 Claude Code（首发）
 
 **事件捕获路径**：
-- **Hook 直采**（`SessionStart` / `SessionEnd` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop` / `SubagentStart` / `SubagentStop`）：覆盖 prompt、工具调用与结果、会话/turn 边界、sub-agent 生命周期。`SessionStart` 派生 `decision.session_start`（含 `source`：startup/resume/clear/compact）、`SessionEnd` 派生 `decision.session_end`（含 `reason`：clear/resume/logout/prompt_input_exit/…），给会话显式闭边界；resume 续接按 `source`/`reason` 配对还原，崩溃 / 被 kill 时无 `session_end`、靠"未收尾"反推（详见 ADR 0012）。`UserPromptSubmit` 中的系统注入块(后台任务完成的 `<task-notification>`、`<system-reminder>` 等)归 `actor=system` 并带 `payload.source`,不被当作人类 prompt(#118)。事件由 `agent-lens-hook claude` 子命令解析 stdin 并 POST 到 Ingest；Ingest 不可达时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink，供日后 `agent-lens replay`。
+- **Hook 直采**（`SessionStart` / `SessionEnd` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `PostToolUseFailure` / `Stop` / `SubagentStart` / `SubagentStop` / `PermissionRequest` / `PermissionDenied` / `PreCompact` / `PostCompact`）：覆盖 prompt、工具调用与结果（含失败）、会话/turn 边界、sub-agent 生命周期、权限 gate、compaction。`SessionStart` 派生 `decision.session_start`（含 `source`：startup/resume/clear/compact）、`SessionEnd` 派生 `decision.session_end`（含 `reason`：clear/resume/logout/prompt_input_exit/…），给会话显式闭边界；resume 续接按 `source`/`reason` 配对还原，崩溃 / 被 kill 时无 `session_end`、靠"未收尾"反推（详见 ADR 0012）。`UserPromptSubmit` 中的系统注入块(后台任务完成的 `<task-notification>`、`<system-reminder>` 等)归 `actor=system` 并带 `payload.source`,不被当作人类 prompt(#118)。事件由 `agent-lens-hook claude` 子命令解析 stdin 并 POST 到 Ingest；Ingest 不可达时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink，供日后 `agent-lens replay`。
 - **Transcript 旁路**（`Stop` 触发时）：读取 hook payload 的 `transcript_path`，对自上次 cursor 起新增的 jsonl 行做增量解析，提取每个 assistant 消息的 `thinking` 与 `text` content block：
   - `thinking` block → `EVENT_KIND_THOUGHT`
   - `text` block → `EVENT_KIND_DECISION`，payload.marker = `assistant_message`
@@ -189,7 +191,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 - 通过 `~/.claude/settings.json` 注册 hook，单一 `agent-lens-hook` 二进制按子命令分发。
 - 可选 MCP server，把 Lens 查询能力反哺给 Agent。
 - **配置快照**（SessionStart + 配置漂移）：每次 SessionStart 起一条 `agent_config_snapshot` 事件，bundle 内容走 artifact store。`UserPromptSubmit` / `PreToolUse` 时若指令文件 / settings hash 漂移，补发新快照。`hook_binary_sha256` 在 SessionStart 算一次，与 bundle 同事件入 hash chain，作为 capture-time attestation。详见 ADR 0003。
-- **人工干预**（PreToolUse 派生 + Stop 启发式 + GitHub webhook 派生）：`PreToolUse` permission decision 派生 `human_intervention.permission_decision`（与 tool_call 共存，via `target_event_id` 链回）；`Stop` 时按 `stop_reason == null` 且无后续 tool_result 启发式推断 `interrupt`；GitHub `pull_request_review` handler 派生 `review_decision`，merge 事件回扫 request_changes 状态派生 `merge_override`。详见 ADR 0004 D2 / D3 / D5。
+- **人工干预**（`PermissionRequest`/`PermissionDenied` 一手 + Stop 启发式 + GitHub webhook 派生）：`PermissionRequest`（权限 gate 出现）派生 `human_intervention.permission_decision`（与 tool_call 共存、via `target_event_id` 链回，记 gate 与 target 工具，`surface=interactive`；终态 `allow`/`unresolved` 由 linker 关联后续 tool 执行判定）；`PermissionDenied`（auto 分类器拒绝）派生 `decision=deny`、`surface=auto_classifier`、observed。自动放行（bypass/acceptEdits 等无 gate）**不**派生 permission_decision——授权事实记在 `tool_call.payload.authorization.permission_mode`(ADR 0010 修正 0004 D2 的 PreToolUse 来源声明、`decision` 集合增 `unresolved`)。`Stop` 时按 `stop_reason == null` 且无后续 tool_result 启发式推断 `interrupt`；GitHub `pull_request_review` handler 派生 `review_decision`，merge 事件回扫 request_changes 状态派生 `merge_override`。详见 ADR 0010、0004 D3 / D5。
 - **上下文变换**（`PreCompact`/`PostCompact` hook + transcript 解析）：`PreCompact` 派生 `context_transform.compaction`（`confidence=provisional`、`triggered_by`、`before.compact_instructions` 过脱敏），`PostCompact` 确认升 `observed`、崩溃停 `provisional`（ADR 0013，取代 0005 D5 的 token-budget 启发式为主路径——后者降为两 hook 未触发时的 fallback）；`system reminder 注入` 由 transcript 解析按 hash 去重发首次（ADR 0005 D3，已落地）。`truncation`（0005 D4）暂缓——本仓自指内容致字符串匹配假阳，待锚定 harness 截断标记契约。详见 ADR 0005 / 0013。
 - **测试执行**（PostToolUse Bash 识别）：`PostToolUse` 时对 `Bash` 命令做首-token 识别（剥 `cd &&`/`env`/`sudo`/`npx`/`bash -c` 等包装器与启动器、拒绝 `echo`/`cat`/`grep` 等假阳），命中测试运行器则派生 `test_run` 事件（与 `tool_result` 共存）；能解析 exit/stdout 时带 pass/fail/计数、否则仅 `ran` + `exit_code`，裁决一律 `confidence=inferred`（本地路径无 observed 级）。`command` 姿态随 `tool_result`（verbatim）。详见 ADR 0011。
 

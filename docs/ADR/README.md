@@ -135,6 +135,7 @@ Patch 文件的硬性约束:
 - **0007 Sub-agent(Task 工具)透明度**(草案):父→子 `delegates` link 设计与开放问题。
 - **0008 Sub-agent 自动 link fallback**(草案):v0.1 K1 实证,撤回 `delegates`,落地 fallback。
 - **0009 Sub-agent 父→子自动链接(`delegates`)**(草案):SubagentStart.agent_id ↔ tool_result.agentId 桥接;v0.2 恢复 ADR 0007 D4 / 取代 ADR 0008 D3。
+- **0010 用 PermissionRequest / PermissionDenied 捕获权限请求一手证据**(Accepted):`human_intervention` 第一个产出方;仅在权限 gate 出现时记 `permission_decision`、auto-deny observed、自动放行不记;修正 0004 D2 来源声明、`decision` 集合增 `unresolved`;复用 0004 `human_intervention`。allow/unresolved 关联留 linker。
 - **0011 本地测试执行的采集**(Accepted):填 proto 既有但无产出方的 `test_run`;`PostToolUse`(Bash)首-token 识别派生,裁决均 `inferred`,不新增 EventKind。
 - **0012 订阅 SessionEnd 补齐会话边界**(Accepted):`SessionEnd` 派生 `decision.session_end`(`reason`)、`SessionStart` 增采 `source`;复用既有 `decision` marker,不新增 EventKind。
 - **0013 订阅 PreCompact / PostCompact**(Accepted):compaction 从启发式 inferred 提到一手 observed;`PreCompact` 标 `provisional`、`PostCompact` 确认 `observed`、崩溃停 `provisional`;复用 0005 `context_transform`,给其 confidence 集合增 `provisional`。

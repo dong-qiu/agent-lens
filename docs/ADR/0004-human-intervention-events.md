@@ -1,6 +1,6 @@
 # ADR 0004:把 human_intervention 升为头等事件
 
-- 状态:Accepted
+- 状态:Accepted — D2 的"`PreToolUse` payload 带 permission decision"来源声明经 ADR 0010 §验证 证伪并更正(改由 `PermissionRequest`/`PermissionDenied` 一手采集;D2 的共存 + `target_event_id` 链回决定不变);D1 的 `decision` 值集合由 ADR 0010 增 `unresolved`。
 - 日期:2026-05-12
 - 取代:—
 - 修订:SPEC §5、§7、§10.1、§17
