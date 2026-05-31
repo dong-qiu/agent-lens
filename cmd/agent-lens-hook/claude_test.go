@@ -505,3 +505,83 @@ func TestTransportFallsBackToSinkOn5xx(t *testing.T) {
 		t.Errorf("sink not written on 5xx: %v", err)
 	}
 }
+
+func countKind(evs []map[string]any, kind string) int {
+	n := 0
+	for _, e := range evs {
+		if e["kind"] == kind {
+			n++
+		}
+	}
+	return n
+}
+
+func appendLine(t *testing.T, path, line string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(line + "\n"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuildEventsStopSystemReminderDedup(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENT_LENS_CURSOR_DIR", filepath.Join(tmp, "cursors"))
+	path := filepath.Join(tmp, "tx.jsonl")
+
+	stop := func() ([]map[string]any, func() error) {
+		return buildEvents(&claudeHookInput{HookEventName: "Stop", SessionID: "s1", TranscriptPath: path})
+	}
+
+	// Turn 1: a static system-reminder + assistant text.
+	appendLine(t, path, `{"type":"user","message":{"content":"<system-reminder>auto-memory header</system-reminder>"}}`)
+	appendLine(t, path, `{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"ok"}]}}`)
+	evs, commit := stop()
+	if got := countKind(evs, "context_transform"); got != 1 {
+		t.Fatalf("turn1 context_transform = %d, want 1", got)
+	}
+	var ct map[string]any
+	for _, e := range evs {
+		if e["kind"] == "context_transform" {
+			ct = e
+		}
+	}
+	p := ct["payload"].(map[string]any)
+	if p["sub_kind"] != "system_reminder_injection" {
+		t.Errorf("sub_kind = %v", p["sub_kind"])
+	}
+	if after := p["after"].(map[string]any); after["injected_text"] != "auto-memory header" {
+		t.Errorf("injected_text = %v", after["injected_text"])
+	}
+	if lh := p["loss_hint"].(map[string]any); lh["confidence"] != "observed" {
+		t.Errorf("confidence = %v, want observed", lh["confidence"])
+	}
+	if actor := ct["actor"].(map[string]any); actor["type"] != "system" {
+		t.Errorf("actor.type = %v, want system", actor["type"])
+	}
+	if err := commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	// Turn 2: SAME reminder re-injected (static) → deduped, no new event.
+	appendLine(t, path, `{"type":"user","message":{"content":"<system-reminder>auto-memory header</system-reminder>"}}`)
+	appendLine(t, path, `{"type":"assistant","message":{"id":"m2","content":[{"type":"text","text":"again"}]}}`)
+	evs2, commit2 := stop()
+	if got := countKind(evs2, "context_transform"); got != 0 {
+		t.Errorf("turn2 context_transform = %d, want 0 (static reminder deduped)", got)
+	}
+	if err := commit2(); err != nil {
+		t.Fatalf("commit2: %v", err)
+	}
+
+	// Turn 3: a DIFFERENT reminder → emitted (distinct hash).
+	appendLine(t, path, `{"type":"user","message":{"content":"<system-reminder>todo changed</system-reminder>"}}`)
+	evs3, _ := stop()
+	if got := countKind(evs3, "context_transform"); got != 1 {
+		t.Errorf("turn3 context_transform = %d, want 1 (distinct reminder)", got)
+	}
+}
