@@ -650,3 +650,100 @@ func TestCompactionTriggerMapping(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildEventsPermissionRequestGate(t *testing.T) {
+	evs, commit := buildEvents(&claudeHookInput{
+		HookEventName: "PermissionRequest",
+		SessionID:     "s1",
+		ToolName:      "Bash",
+		ToolInput:     json.RawMessage(`{"command":"rm -rf /tmp/x"}`),
+	})
+	if commit != nil {
+		t.Errorf("PermissionRequest should not return a commit fn")
+	}
+	if len(evs) != 1 || evs[0]["kind"] != "human_intervention" {
+		t.Fatalf("got %+v, want one human_intervention event", evs)
+	}
+	ev := evs[0]
+	if actor := ev["actor"].(map[string]any); actor["type"] != "human" {
+		t.Errorf("actor.type = %v, want human", actor["type"])
+	}
+	p := ev["payload"].(map[string]any)
+	if p["sub_kind"] != "permission_decision" {
+		t.Errorf("sub_kind = %v", p["sub_kind"])
+	}
+	if p["surface"] != "interactive" {
+		t.Errorf("surface = %v, want interactive", p["surface"])
+	}
+	// No terminal verdict at gate time — that's the linker's job.
+	if _, ok := p["decision"]; ok {
+		t.Errorf("gate should carry no decision (pending linker), got %v", p["decision"])
+	}
+	if tool := p["tool"].(map[string]any); tool["name"] != "Bash" {
+		t.Errorf("tool.name = %v, want Bash", tool["name"])
+	}
+}
+
+func TestBuildEventsPermissionDenied(t *testing.T) {
+	evs, _ := buildEvents(&claudeHookInput{
+		HookEventName: "PermissionDenied",
+		SessionID:     "s1",
+		ToolName:      "Bash",
+	})
+	if len(evs) != 1 || evs[0]["kind"] != "human_intervention" {
+		t.Fatalf("got %+v, want one human_intervention event", evs)
+	}
+	p := evs[0]["payload"].(map[string]any)
+	if p["decision"] != "deny" {
+		t.Errorf("decision = %v, want deny", p["decision"])
+	}
+	if p["surface"] != "auto_classifier" {
+		t.Errorf("surface = %v, want auto_classifier", p["surface"])
+	}
+	if lh := p["confidence"]; lh != "observed" {
+		t.Errorf("confidence = %v, want observed", lh)
+	}
+	if actor := evs[0]["actor"].(map[string]any); actor["type"] != "system" {
+		t.Errorf("actor.type = %v, want system", actor["type"])
+	}
+}
+
+func TestMakeToolCallCapturesPermissionMode(t *testing.T) {
+	evs, _ := buildEvents(&claudeHookInput{
+		HookEventName:  "PreToolUse",
+		SessionID:      "s1",
+		ToolName:       "Edit",
+		ToolInput:      json.RawMessage(`{"file":"x"}`),
+		PermissionMode: "bypassPermissions",
+	})
+	p := evs[0]["payload"].(map[string]any)
+	auth := p["authorization"].(map[string]any)
+	if auth["permission_mode"] != "bypassPermissions" {
+		t.Errorf("permission_mode = %v, want bypassPermissions", auth["permission_mode"])
+	}
+}
+
+func TestBuildEventsPostToolUseFailureEmitsToolResult(t *testing.T) {
+	// A failed tool still yields a tool_result; a failing Bash test still
+	// derives a test_run (outcome fail).
+	evs, _ := buildEvents(&claudeHookInput{
+		HookEventName: "PostToolUseFailure",
+		SessionID:     "s1",
+		ToolName:      "Bash",
+		ToolInput:     json.RawMessage(`{"command":"go test ./..."}`),
+		ToolResponse:  json.RawMessage(`{"stdout":"--- FAIL: TestX\nFAIL\tpkg\t0.1s\n"}`),
+	})
+	if countKind(evs, "tool_result") != 1 {
+		t.Errorf("want a tool_result on failure, got %+v", evs)
+	}
+	if countKind(evs, "test_run") != 1 {
+		t.Fatalf("failing test should still derive test_run, got %+v", evs)
+	}
+	for _, e := range evs {
+		if e["kind"] == "test_run" {
+			if e["payload"].(map[string]any)["outcome"] != "fail" {
+				t.Errorf("failed test_run outcome = %v, want fail", e["payload"].(map[string]any)["outcome"])
+			}
+		}
+	}
+}

@@ -50,6 +50,9 @@ type claudeHookInput struct {
 	// carries custom_instructions (what the user passed to /compact). ADR 0013.
 	Trigger            string `json:"trigger,omitempty"`
 	CustomInstructions string `json:"custom_instructions,omitempty"`
+	// PreToolUse carries permission_mode (default/acceptEdits/bypassPermissions/
+	// auto/dontAsk/plan) — the authorization path for a tool call. ADR 0010 D3.
+	PermissionMode string `json:"permission_mode,omitempty"`
 }
 
 // runClaude reads a Claude Code hook payload on stdin and forwards a wire
@@ -100,16 +103,23 @@ func buildEvents(in *claudeHookInput) (events []map[string]any, commit func() er
 		return []map[string]any{makePrompt(in)}, nil
 	case "PreToolUse":
 		return []map[string]any{makeToolCall(in)}, nil
-	case "PostToolUse":
+	case "PostToolUse", "PostToolUseFailure":
+		// A failed tool still ran — capture its tool_result either way (ADR
+		// 0010); the failure response feeds the same paths.
 		evs := []map[string]any{makeToolResult(in)}
 		// A Bash command that ran a test suite additionally derives a
-		// `test_run` event, co-existing with the tool_result (ADR 0011).
+		// `test_run` event, co-existing with the tool_result (ADR 0011). A
+		// failing test fires here too, so its failure is captured.
 		if in.ToolName == "Bash" {
 			if tr := makeTestRun(in); tr != nil {
 				evs = append(evs, tr)
 			}
 		}
 		return evs, nil
+	case "PermissionRequest":
+		return []map[string]any{makePermissionGate(in)}, nil
+	case "PermissionDenied":
+		return []map[string]any{makePermissionDenied(in)}, nil
 	case "SessionStart":
 		return []map[string]any{makeSessionStart(in)}, nil
 	case "SessionEnd":
@@ -242,15 +252,20 @@ func makeToolCall(in *claudeHookInput) map[string]any {
 		"name":  in.ToolName,
 		"input": in.ToolInput,
 	}
-	// Authorization context: which allowlist rule matched (if any),
-	// and any high-risk patterns detected in the input. PreToolUse
-	// only fires after Claude Code has granted permission, so this
-	// classifies the *path* by which permission was granted:
-	//   allowlist_match != "" → auto-allowed by policy
-	//   allowlist_match == "" → user must have approved interactively
-	// risk_signals flags audit-relevant patterns regardless of path.
+	// Authorization context (ADR 0010 D3). permission_mode is the authoritative
+	// signal for *how* this tool was authorized: bypassPermissions/acceptEdits/
+	// auto/dontAsk are policy auto-allow (no human gate, no permission_decision —
+	// the authorization fact lives right here); default/ask present a gate
+	// (captured first-party via PermissionRequest). allowlist_match is a
+	// secondary signal — which settings allow-rule matched — no longer relied on
+	// to infer "user vs auto" (PreToolUse fires *before* any interactive prompt,
+	// so its presence never proved a human approved). risk_signals flags
+	// audit-relevant patterns regardless of path.
 	auth := map[string]any{
 		"risk_signals": detectRiskSignalsOrEmpty(in.ToolName, in.ToolInput),
+	}
+	if in.PermissionMode != "" {
+		auth["permission_mode"] = in.PermissionMode
 	}
 	if perms := loadPermissionsSnapshot(in.CWD); perms != nil {
 		if allowAny, ok := perms["allow"].([]any); ok {
@@ -312,6 +327,38 @@ func detectRiskSignalsOrEmpty(toolName string, toolInput json.RawMessage) []stri
 		return []string{}
 	}
 	return out
+}
+
+// makePermissionGate captures a PermissionRequest — a permission gate was
+// presented for a tool (in default/ask mode a human is being asked to authorize
+// it). Derives human_intervention.permission_decision recording the gate +
+// target tool, with NO terminal `decision`: whether it became `allow` (a
+// subsequent tool_result/failure) or `unresolved` (turn ended, no execution) is
+// correlated by the linker (ADR 0010 D2, landed in two steps — see ADR §落地).
+// The tool name+input let the linker match the gate to its tool_call. ADR 0010 D1.
+func makePermissionGate(in *claudeHookInput) map[string]any {
+	payload := map[string]any{
+		"sub_kind":     "permission_decision",
+		"surface":      "interactive",
+		"confidence":   "inferred",
+		"tool":         map[string]any{"name": in.ToolName, "input": in.ToolInput},
+		"outcome_note": "permission gate presented; allow/unresolved verdict pending linker correlation with subsequent tool execution",
+	}
+	return baseEvent(in, map[string]any{"type": "human", "id": "user"}, "human_intervention", payload)
+}
+
+// makePermissionDenied captures a PermissionDenied — the auto-mode classifier
+// refused a tool, no human in the loop. decision=deny is terminal and observed.
+// surface=auto_classifier (not a human gate); actor is the system. ADR 0010 D2.
+func makePermissionDenied(in *claudeHookInput) map[string]any {
+	payload := map[string]any{
+		"sub_kind":   "permission_decision",
+		"surface":    "auto_classifier",
+		"decision":   "deny",
+		"confidence": "observed",
+		"tool":       map[string]any{"name": in.ToolName},
+	}
+	return baseEvent(in, map[string]any{"type": "system", "id": "claude-code"}, "human_intervention", payload)
 }
 
 func makeToolResult(in *claudeHookInput) map[string]any {

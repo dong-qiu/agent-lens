@@ -79,6 +79,30 @@
           {"type": "command", "command": "agent-lens-hook claude", "timeout": 5}
         ]
       }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": "agent-lens-hook claude", "timeout": 5}
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": "agent-lens-hook claude", "timeout": 5}
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": "agent-lens-hook claude", "timeout": 5}
+        ]
+      }
     ]
   },
   "worktree": {
