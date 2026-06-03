@@ -1,9 +1,8 @@
 # ADR 0014:用每事件幂等键去重,与事件 id / 哈希链排序解耦
 
-- 状态:草案
+- 状态:Accepted(设计锁定;**实现延后**——见 § 落地)
 - 日期:2026-06-03
 - 取代:—
-- 修订(待 Accepted):SPEC §7(Event 增 `idempotency_key`)、§10.1(hook 重放幂等)
 
 ## 背景
 
@@ -24,7 +23,7 @@
 - `internal/ingest/handler.go:181`:`if in.ID == "" { in.ID = ulid.Make().String() }`——保留 client id,但 hook 不提供 id;`baseEvent` 返回的 map **无 `id` 键**。
 - **排序与哈希链头都靠 `id`(ULID)**:`internal/store/postgres.go` `ORDER BY session_id, id ASC`(列表)、`ORDER BY id ASC LIMIT`(按 session)、`HeadHash` `ORDER BY id DESC LIMIT 1`。即**哈希链的"上一条" = 当前最大 id**;新事件入库时 prev_hash 取自该链头,故新事件 id 必须比链头**大**,链才接得对。`internal/audit/verify.go` 的链校验是**按 id-asc 顺序走 linkage**(不重算 hash),同样依赖 id 单调。
 - **关键结论**:服务端单调 ULID 是**哈希链完整性载荷**。若改用产出方自生成的 ULID 当 `id`(跨进程、系统时钟有偏移),迟到事件可能拿到比链头**小**的 id → `HeadHash` 选错头 / verify linkage 断。本 ADR 因此触及 `internal/hashchain` 完整性推理,接受 / 落地走**强制 `/review`**(即便结论是"`id` 不动")。
-- **已存在的 `id` 不变量违反**:`internal/webhooks/deploy/mapper.go:76` 把 `Idempotency-Key` 头(最长 128 字符的任意字符串)**塞进 `WireEvent.ID`**;`github/mapper.go` 把 `deliveryID` 塞进 `id`。这两者已经不是服务端 ULID——deploy 的 `id="my-deploy-key"` 按字典序排,**当下就在破坏 `HeadHash=max(id)`**。本 ADR 顺带修正(D2)。
+- **已存在的 `id` 不变量违反(潜在脆弱,非 live 损坏 hook 链)**:`internal/webhooks/deploy/mapper.go:76` 把 `Idempotency-Key` 头(最长 128 字符的任意字符串)**塞进 `WireEvent.ID`**;`github/mapper.go` 把 `deliveryID` 塞进 `id`。这两者已经不是服务端 ULID。`HeadHash` 是**按 session 分**的(`WHERE session_id = $1 ORDER BY id DESC`),deploy / github 与 hook 在**不同 session_id 空间、不交叉**,故不破坏 hook 链;但**在 deploy / github 会话内**,`max(id)` 对任意字符串选头**非单调、脆弱**(一条字典序更小的 redelivery 选不出对的链头)。本 ADR 顺带把它们的 `id` 也归服务端 ULID(D1 / D2)。
 
 ## 决定
 
@@ -48,8 +47,8 @@
 ### D3. 服务端按 `idempotency_key` 幂等插入,返回真实 inserted 数,批量遇重**跳过续行**
 
 - store 加 `idempotency_key` 列 + 唯一索引;插入走 `ON CONFLICT (idempotency_key) DO NOTHING`。**memory store(`internal/store/memory.go`,测试与 `AGENT_LENS_STORE=memory` 默认后端)必须镜像同一去重**——加 `idempotency_key` 索引、命中返回 `ErrDuplicate`,否则整套测试都跑不到去重语义。
-- `/v1/events` 的 `{accepted: N}` 返回**实际入库数**(非批大小);HTTP 批量遇已见键 → **跳过该条、继续**,不再 409 整批失败(现状 `writeAppendError` 把 dup 当 409 中断,使重放整批挂掉)。webhook 路径维持优雅 ack。
-- **静默跳重在此是安全的**:键是每事件 ULID,两条**不同**事件几乎不可能撞同键(ULID 80 位随机),故"重复键"恒等于"同一物理事件被重发"——丢弃总是对的(这点是 ULID 键相对内容 hash 的又一优势:内容 hash 的"丢重可能丢真事件"风险不存在)。仍对每次 skip 打一条结构化日志(key/session/kind),便于排查。
+- `/v1/events` 的 `{accepted: N}` 返回**实际入库数**(非批大小);HTTP 批量遇已见键 → **跳过该条、继续**,不再 409 整批失败(现状 `writeAppendError` 把 dup 当 409 中断,使重放整批挂掉)。webhook 路径维持优雅 ack。**这是一处 HTTP 契约翻转**:重放一份已入库的文件,从今天的"409 失败"变成"200 `{accepted:0}`"——`replay.go` 现在拿非 2xx 当失败、是个隐性安全网,翻转后它会静默成功;落地须同步 `replay` 的退出码语义与相关测试。
+- **静默跳重在此安全,但仅限"冻结的 wire event 被重发"**:键是每事件 ULID,两条**不同**事件几乎不可能撞同键(ULID 80 位随机),故"重复键 = 同一物理事件被重发"——丢弃总是对的(内容 hash 的"丢重可能丢真事件"风险不存在)。**边界**:ULID 键去重的是**冻结进 NDJSON 的重放**(D4);它**不**去重"transcript cursor 未推进、同一事件被重新派生"——重新派生会 `ulid.Make()` 拿到**新键**、不撞重。这是既有的 at-least-once 边界(`Send` 成功但 cursor 未 commit / 崩溃),**非本 ADR 退化**,本 ADR 也不声称解决它。每次 skip 打一条结构化日志(key/session/kind)便于排查。
 
 **否决备选**:dup 仍 409 整批失败(候选 A)。重放本就预期撞重,整批失败让"安全重跑"无从谈起。
 
@@ -57,11 +56,15 @@
 
 `idempotency_key` 是 wire event 的字段,Ingest 不可达回落 sink 时一并写入;`replay` 原样 re-POST,键不变 → 服务端跳重。
 
-**过渡窗(经检视纠正)**:本保证**仅对升级后的 hook 产生的事件**。升级前已写在 `~/.agent-lens/sessions/` 的 fallback 文件**没有键**(字段还不存在),入库时 `idempotency_key` 为 NULL、不参与去重(D5),重放它们**仍会重复**。故对这些旧文件 `--remove-on-success` 仍是必须;只有新事件才"可选"。不试图回填旧文件(键是每事件 ULID、无法从内容重建)。
+**过渡窗(经检视纠正)**:本保证**仅对升级后的 hook 产生的事件**。升级前已写在 `~/.agent-lens/sessions/` 的 fallback 文件**没有键**(字段还不存在),入库时 `idempotency_key` 为 NULL、不参与去重(D5),重放它们**仍会重复**。故 **`--remove-on-success` 在整个过渡窗内保持必须**——直到确认磁盘上不再有升级前的 fallback 文件,才谈得上"对新事件可选"。一次 `replay` 可能同时处理新旧文件(混批),只看"新事件可选"会是脚枪。不试图回填旧文件(键是每事件 ULID、无法从内容重建)。
 
-### D5. 纯增量、不破坏既有数据
+### D5. 去重轴从 `id` 搬到 `idempotency_key`;对老数据纯增量,但 webhook 的"靠什么去重"变了
 
-`idempotency_key` 列可空(老事件无键、不去重,保持现状);唯一索引对 NULL 不约束(Postgres 多 NULL 允许;memory 镜像同语义)。server 启动自迁移加列 + 索引(`AGENT_LENS_SKIP_MIGRATE` 之外)。`id` 与哈希链一字不动。
+`id` / 哈希链一字不动(D1)。但**去重的依据从 `id` 搬到 `idempotency_key`**,这对 webhook 路径是**机制变更、非纯增量**:今天 webhook 靠 `id = deliveryID` + 主键唯一去重;D1 把 `id` 改服务端 ULID 后,redelivery 的 `id` 不再相同,**去重必须改挂 `idempotency_key`**。因此:
+
+- store 加 `idempotency_key` 列 + 唯一索引;**memory store 现按 `id`(`byID`)去重,必须新增独立的 `byKey` 索引**——`id` 永远唯一后 `byID` 对去重失效,redelivery 只能靠 `byKey` 撞重,否则 webhook 去重静默退化。webhook redelivery 测试是这条的回归守卫。
+- 对**老数据纯增量**:老事件 `idempotency_key` 为 NULL、不去重,保持现状;唯一索引对 NULL 不约束(Postgres 多 NULL 允许;memory 镜像同语义)。无 `Idempotency-Key` 头的 webhook 投递键也是 NULL → 与今天一样不去重(本就如此,不变)。
+- server 启动自迁移加列 + 索引(`AGENT_LENS_SKIP_MIGRATE` 之外)。
 
 ## Scope(本 ADR 范围)
 
@@ -69,10 +72,11 @@
 
 - `proto/event.proto`:`Event` 增 `idempotency_key`(string)→ `make proto`;`internal/ingest` `WireEvent` 同步。
 - `cmd/agent-lens-hook`:`baseEvent` 每事件 `ulid.Make()` 生成键写入 wire event(随 transport / NDJSON fallback 一并带出)。
-- `internal/store`:**postgres 与 memory 双实现**——events 加 `idempotency_key` 列/索引;`AppendEvent` 走 `ON CONFLICT DO NOTHING` / memory 索引,回报是否实际插入;新 Postgres migration(server 自迁移)。
+- `internal/store`:**postgres 与 memory 双实现**——events 加 `idempotency_key` 列/索引;memory **新增 `byKey` 索引**(`byID` 去重对 always-unique 的 `id` 失效);`AppendEvent` 走 `ON CONFLICT DO NOTHING` / memory `byKey`,命中返回 `ErrDuplicate` 并回报是否实际插入;新 Postgres migration(server 自迁移)。
 - `internal/ingest/handler.go`:批量遇去重改"跳过续行 + 计数",`{accepted}` 返回真实 inserted 数;每 skip 一条结构化日志。
-- `internal/webhooks/github`、`internal/webhooks/deploy`:`id` 改服务端 ULID,`idempotency_key` 设 deliveryID / Idempotency-Key 头;更新各自 `*_test.go` 里"id 应等于 deliveryID"的断言与 handler.go:111 的过期注释。
-- `internal/query` GraphQL:`Event` **透出 `idempotencyKey`**——审计端要能回答"这条为什么没入库 / 是不是被去重了",非纯调试字段。
+- `cmd/agent-lens-hook/replay.go` + `transport.go`:`replay` 遇 `{accepted:0}`(200)不再当失败(同步退出码语义);更新 `replayUsage` / `warnFallback` 里"重放会重复、务必 `--remove-on-success`"的过期措辞(改为"对升级后的事件可选,过渡窗内仍必须")。
+- `internal/webhooks/github`、`internal/webhooks/deploy`:`id` 改服务端 ULID,`idempotency_key` 设 deliveryID / Idempotency-Key 头;更新各自 `*_test.go` 里"id 应等于 deliveryID"的断言(改为 `idempotency_key` 等于、`id` 是 ULID)与 handler.go:111 的过期注释。**redelivery 去重测试是 D5 机制搬移的回归守卫。**
+- `internal/query` GraphQL:`Event` **透出 `idempotencyKey`**(→ `make gqlgen`)——记录某条事件的键;注意被去重**跳过的事件没有行可查**,"什么被去重了"只在 D3 的结构化日志里。
 
 **本 ADR 不带任何代码改动。**
 
@@ -86,3 +90,14 @@
 - 数据增量:每事件一个 26 字符 ULID 键 + 一个唯一索引。比内容 hash(64 hex)更省。
 - migration:加列 + 索引;老事件键 NULL、不回填(保持现状)。
 - 显式留给后续:旧 fallback 文件的回填(无法从内容重建键,仅能靠 `--remove-on-success`);全局跨产出方去重策略沿用同一 `idempotency_key` 契约,不需再决策。
+
+## 落地
+
+**设计已锁定(Accepted),实现延后。** 接受本 ADR 把方向、键选型、id/链解耦定死,避免将来重新论证;但**不立即落码**——理由:
+
+- #81 的激活条件("真实 dogfood 重放出现重复")**尚未触发**;"linker 需要去重"的理由已撤回(linker 自幂等)。
+- 实现成本中等(proto + store×2 + 两个 webhook 迁移 + migration + `/v1/events` 409→200 契约翻转 + 强制 `/review` + 测试改),不值得为未触发的条件先付。
+
+**落地触发条件**(任一):dogfood 实际观测到重放重复;或第二个产出方需要跨路径去重;或着手做依赖"事件至多一条"的下游(如某些 linker 聚合)。届时按 § Scope 一个 PR 落,走**强制 `/review`**(触及 `internal/hashchain` 推理与 store)。本设计已经两轮独立检视(2026-06-03)。
+
+接受本 ADR 时,SPEC §7 把 `idempotency_key` 列为 `Event` 的(已接受、待落地)字段,与 0003–0005 EventKind "Accepted-but-unlanded" 同例;§10.1 标注"replay 幂等:设计已接受(ADR 0014),实现 gate 在 #81"。
