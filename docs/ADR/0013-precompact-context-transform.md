@@ -35,6 +35,12 @@ Claude Code 官方 hooks 文档(https://code.claude.com/docs/en/hooks,2026-05-29
 
 落地 PR 按 ADR 0002 / 0005 同款记录覆盖度:用一份发生过自动 compaction、以及一次手动 `/compact` 的真实 session 核对上述三项。
 
+**抓样核对结果(2026-06-03,dogfood dump-hook)**:
+
+- ✅ `PreCompact` 实测携带 `trigger`(手动 `/compact` = `manual`)+ **`custom_instructions`**(手动带内容、`PostCompact` 不带)——`makeCompaction` 读 `trigger` / `custom_instructions` 的假设成立(该字段早期草案曾据二手摘要误判不存在,实测坐实存在)。
+- ✅ 手动 `/compact` 实测 `PreCompact` → `PostCompact` 成对触发,均 `trigger=manual`。
+- ⏳ 自动 compaction 的 Pre/Post 顺序、`PreCompact` 无配对 `PostCompact` 的崩溃形态、`PostCompact` 后 summary 落点——本次(手动 `/compact`)未触发到,保留为后续;D1 的"崩溃停 `provisional`"设计已兜底。
+
 ## 决定
 
 ### D1. `PreCompact` 派生 provisional 的 `context_transform.compaction`,`PostCompact` 确认升 observed

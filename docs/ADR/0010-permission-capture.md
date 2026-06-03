@@ -43,6 +43,13 @@ Claude Code 官方 hooks 文档(https://code.claude.com/docs/en/hooks,2026-05-29
 
 落地 PR 按 ADR 0002 同款做覆盖度记录:抓一份 `default` 模式下发生过权限对话框(含一次 allow、一次 deny)与一份 `bypassPermissions` 模式的真实 session 核对上表。
 
+**抓样核对结果(2026-06-03,dogfood dump-hook)**:
+
+- ✅ `PermissionRequest` 实测携带 **`tool_name`**(=`Bash`)——`makePermissionGate` 读工具信息成立,0010 放弃"最近未配对 PreToolUse"脆弱关联、直接用 `PermissionRequest` 作主锚的前提坐实。
+- ✅ 失败工具(`cat` 不存在文件)实测走 **`PostToolUseFailure`**(非 `PostToolUse`)且带 `tool_name`——失败工具不漏,`buildEvents` 合并分支成立。
+- ✅ `default`/ask 模式下 `PermissionRequest` 连续触发(每个非 allowlist 工具一次);**未见 `PermissionDenied`**——预期内,它只在 auto 模式分类器拒绝时触发。
+- ⏳ "交互式 deny 后既无 `PostToolUse` 也无 `PostToolUseFailure`"本次未直接验(未做一次 deny);`allow`/`unresolved` 的关联判定归 linker 后续(见 §落地)。
+
 ## 决定
 
 ### D1. **只在 `PermissionRequest` 触发时**派生 `permission_decision`;自动放行不记为人类干预
