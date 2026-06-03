@@ -1,7 +1,9 @@
 # Agent Lens — 项目 SPEC
 
-> 版本：v0.10（2026-06-01）
+> 版本：v0.11（2026-06-03）
 > 状态：草案 / 规划阶段
+>
+> v0.11 变更：接受 ADR 0014（每事件 `idempotency_key` 去重,与 `id`/哈希链排序解耦）——`Event` 增 `idempotency_key` 字段(§7)。**设计已锁定、实现延后**(gate 在 #81 真触发);hook 重放幂等是其目标。详见 `docs/ADR/0014-idempotency-key-dedup.md`。
 >
 > v0.10 变更：给 `human_intervention` 第一个产出方——订阅 `PermissionRequest`（→ `permission_decision` 记权限 gate 出现，一手证据）、`PermissionDenied`（→ `decision=deny` auto 拒绝，observed）、`PostToolUseFailure`（→ `tool_result` 补齐失败工具）。`permission_mode` 入 `tool_call.authorization`。修正 0004 D2 的 `PreToolUse` 来源声明、给 `decision` 集合增 `unresolved`。allow/unresolved 的关联判定留 linker 后续。详见 `docs/ADR/0010-permission-capture.md`。
 >
@@ -91,6 +93,7 @@ Event {
   refs:    [artifact_id]
   hash, prev_hash          // 哈希链
   sig?                     // 可选签名
+  idempotency_key?         // 每事件去重键（ADR 0014，已接受、待落地）
 }
 
 Artifact {
@@ -182,7 +185,7 @@ v1 不计算 / 不存储费用。事件层面只承载原始 token 数,turn / se
 ### 10.1 Claude Code（首发）
 
 **事件捕获路径**：
-- **Hook 直采**（`SessionStart` / `SessionEnd` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `PostToolUseFailure` / `Stop` / `SubagentStart` / `SubagentStop` / `PermissionRequest` / `PermissionDenied` / `PreCompact` / `PostCompact`）：覆盖 prompt、工具调用与结果（含失败）、会话/turn 边界、sub-agent 生命周期、权限 gate、compaction。`SessionStart` 派生 `decision.session_start`（含 `source`：startup/resume/clear/compact）、`SessionEnd` 派生 `decision.session_end`（含 `reason`：clear/resume/logout/prompt_input_exit/…），给会话显式闭边界；resume 续接按 `source`/`reason` 配对还原，崩溃 / 被 kill 时无 `session_end`、靠"未收尾"反推（详见 ADR 0012）。`UserPromptSubmit` 中的系统注入块(后台任务完成的 `<task-notification>`、`<system-reminder>` 等)归 `actor=system` 并带 `payload.source`,不被当作人类 prompt(#118)。事件由 `agent-lens-hook claude` 子命令解析 stdin 并 POST 到 Ingest；Ingest 不可达时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink，供日后 `agent-lens replay`。
+- **Hook 直采**（`SessionStart` / `SessionEnd` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `PostToolUseFailure` / `Stop` / `SubagentStart` / `SubagentStop` / `PermissionRequest` / `PermissionDenied` / `PreCompact` / `PostCompact`）：覆盖 prompt、工具调用与结果（含失败）、会话/turn 边界、sub-agent 生命周期、权限 gate、compaction。`SessionStart` 派生 `decision.session_start`（含 `source`：startup/resume/clear/compact）、`SessionEnd` 派生 `decision.session_end`（含 `reason`：clear/resume/logout/prompt_input_exit/…），给会话显式闭边界；resume 续接按 `source`/`reason` 配对还原，崩溃 / 被 kill 时无 `session_end`、靠"未收尾"反推（详见 ADR 0012）。`UserPromptSubmit` 中的系统注入块(后台任务完成的 `<task-notification>`、`<system-reminder>` 等)归 `actor=system` 并带 `payload.source`,不被当作人类 prompt(#118)。事件由 `agent-lens-hook claude` 子命令解析 stdin 并 POST 到 Ingest；Ingest 不可达时回落 `~/.agent-lens/sessions/<sid>.ndjson` 文件 sink，供日后 `agent-lens replay`。**replay 幂等**:设计已接受(ADR 0014——每事件 `idempotency_key` + 服务端 `ON CONFLICT DO NOTHING`),**实现延后**(gate 在 #81 真触发);在此之前 `replay --remove-on-success` 仍是避免重复的手段。
 - **Transcript 旁路**（`Stop` 触发时）：读取 hook payload 的 `transcript_path`，对自上次 cursor 起新增的 jsonl 行做增量解析，提取每个 assistant 消息的 `thinking` 与 `text` content block：
   - `thinking` block → `EVENT_KIND_THOUGHT`
   - `text` block → `EVENT_KIND_DECISION`，payload.marker = `assistant_message`

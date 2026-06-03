@@ -139,6 +139,7 @@ Patch 文件的硬性约束:
 - **0011 本地测试执行的采集**(Accepted):填 proto 既有但无产出方的 `test_run`;`PostToolUse`(Bash)首-token 识别派生,裁决均 `inferred`,不新增 EventKind。
 - **0012 订阅 SessionEnd 补齐会话边界**(Accepted):`SessionEnd` 派生 `decision.session_end`(`reason`)、`SessionStart` 增采 `source`;复用既有 `decision` marker,不新增 EventKind。
 - **0013 订阅 PreCompact / PostCompact**(Accepted):compaction 从启发式 inferred 提到一手 observed;`PreCompact` 标 `provisional`、`PostCompact` 确认 `observed`、崩溃停 `provisional`;复用 0005 `context_transform`,给其 confidence 集合增 `provisional`。
+- **0014 用每事件幂等键去重,与 id / 哈希链排序解耦**(Accepted — 设计锁定、实现延后):#81——hook 不设 id 致重放重复;排序 / 链头都靠服务端 ULID(完整性载荷),故 `id` 不动、另加**每事件 ULID** `idempotency_key` 做 dedup。实现 gate 在 #81 真触发(详见 § 落地)。
 
 (0003–0005 接受时的 `spec-patches-pending-0003-0005.md` 已随 #100 合入删除。)
 
