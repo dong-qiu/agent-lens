@@ -55,7 +55,7 @@
 
 ### D4. 键随 wire event 入 NDJSON fallback,重放原样带回 → 幂等;过渡窗诚实限定
 
-`idempotency_key` 是 wire event 的字段,Ingest 不可达回落 sink 时一并写入;`replay` 原样 re-POST，键不变 → 服务端跳重。
+`idempotency_key` 是 wire event 的字段,Ingest 不可达回落 sink 时一并写入;`replay` 原样 re-POST,键不变 → 服务端跳重。
 
 **过渡窗(经检视纠正)**:本保证**仅对升级后的 hook 产生的事件**。升级前已写在 `~/.agent-lens/sessions/` 的 fallback 文件**没有键**(字段还不存在),入库时 `idempotency_key` 为 NULL、不参与去重(D5),重放它们**仍会重复**。故对这些旧文件 `--remove-on-success` 仍是必须;只有新事件才"可选"。不试图回填旧文件(键是每事件 ULID、无法从内容重建)。
 
