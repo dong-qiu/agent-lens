@@ -25,8 +25,13 @@ var (
 
 	ingestFailures = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "agent_lens_ingest_failures_total",
-		Help: "Ingest attempts that failed, by reason (decode, validation, duplicate, store).",
+		Help: "Ingest attempts that failed, by reason (decode, validation, store).",
 	}, []string{"reason"})
+
+	eventsDeduped = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "agent_lens_events_deduped_total",
+		Help: "Events skipped as idempotent duplicates (ADR 0014), by kind. Expected during replay; not a failure.",
+	}, []string{"kind"})
 
 	sessionHeadCacheSize = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "agent_lens_session_head_cache_size",
@@ -46,6 +51,11 @@ func EventIngested(kind string) { eventsIngested.WithLabelValues(kind).Inc() }
 // IngestFailure increments the per-reason failure counter. reason must come
 // from a small fixed set (see IngestFailures' Help) so cardinality stays bounded.
 func IngestFailure(reason string) { ingestFailures.WithLabelValues(reason).Inc() }
+
+// IngestDeduped increments the per-kind idempotent-skip counter. A dedup skip
+// is the expected replay / retried-POST outcome (ADR 0014), not a failure, so
+// it is counted on its own series to keep ingest-failure alerting clean.
+func IngestDeduped(kind string) { eventsDeduped.WithLabelValues(kind).Inc() }
 
 // SetSessionHeadCacheSize records the current head-hash cache entry count.
 func SetSessionHeadCacheSize(n int) { sessionHeadCacheSize.Set(float64(n)) }

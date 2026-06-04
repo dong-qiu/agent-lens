@@ -28,6 +28,18 @@ func TestEventIngestedAndFailureCounters(t *testing.T) {
 	if d := testutil.ToFloat64(fail) - beforeFail; d != 1 {
 		t.Errorf("ingest_failures{reason=decode} delta = %v, want 1", d)
 	}
+
+	// A dedup skip lands on its own series, not ingest_failures (#138).
+	dedup := eventsDeduped.WithLabelValues("prompt")
+	beforeDedup := testutil.ToFloat64(dedup)
+	failBefore := testutil.ToFloat64(ingestFailures.WithLabelValues("duplicate"))
+	IngestDeduped("prompt")
+	if d := testutil.ToFloat64(dedup) - beforeDedup; d != 1 {
+		t.Errorf("events_deduped{kind=prompt} delta = %v, want 1", d)
+	}
+	if d := testutil.ToFloat64(ingestFailures.WithLabelValues("duplicate")) - failBefore; d != 0 {
+		t.Errorf("ingest_failures{reason=duplicate} delta = %v, want 0 (dedup must not touch failures)", d)
+	}
 }
 
 func TestSetSessionHeadCacheSize(t *testing.T) {
@@ -69,6 +81,7 @@ func TestHandlerServesExposition(t *testing.T) {
 	// Touch each collector so its series is present in the exposition.
 	EventIngested("commit")
 	IngestFailure("store")
+	IngestDeduped("commit")
 	SetSessionHeadCacheSize(1)
 	graphqlRequestDuration.Observe(0.01)
 
@@ -81,6 +94,7 @@ func TestHandlerServesExposition(t *testing.T) {
 	for _, name := range []string{
 		"agent_lens_events_ingested_total",
 		"agent_lens_ingest_failures_total",
+		"agent_lens_events_deduped_total",
 		"agent_lens_session_head_cache_size",
 		"agent_lens_graphql_request_duration_seconds",
 	} {
