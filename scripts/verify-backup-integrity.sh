@@ -60,11 +60,13 @@ swap_db() {
   echo "${prefix}/${new}${query}"
 }
 
-# Resolve hook binary: explicit env > known dev path > $PATH.
+# Resolve hook binary: explicit env > GOBIN/GOPATH dev path > $PATH.
+gobin="$(go env GOBIN 2>/dev/null)"
+[[ -z "$gobin" ]] && gobin="$(go env GOPATH 2>/dev/null)/bin"
 if [[ -n "${AGENT_LENS_HOOK_BIN:-}" ]]; then
   hook="$AGENT_LENS_HOOK_BIN"
-elif [[ -x "$HOME/go/bin/agent-lens-hook" ]]; then
-  hook="$HOME/go/bin/agent-lens-hook"
+elif [[ -n "$gobin" && -x "$gobin/agent-lens-hook" ]]; then
+  hook="$gobin/agent-lens-hook"
 elif command -v agent-lens-hook >/dev/null 2>&1; then
   hook="$(command -v agent-lens-hook)"
 else
