@@ -171,7 +171,16 @@ func (h *Handler) IngestNDJSON(w http.ResponseWriter, r *http.Request) {
 // any) runs after the lock is released.
 func (h *Handler) Append(ctx context.Context, in *WireEvent) error {
 	if err := h.appendLocked(ctx, in); err != nil {
-		metrics.IngestFailure(failureReason(err))
+		// A duplicate is an expected idempotent skip (ADR 0014 D3), not a
+		// failure — a single replay can dedup a whole file at once. Count it
+		// on its own series so ingest-failure alerting isn't inflated. Both
+		// ingest entry points (NDJSON loop, webhooks) funnel through here, so
+		// the split is applied once for all callers.
+		if errors.Is(err, store.ErrDuplicate) {
+			metrics.IngestDeduped(in.Kind)
+		} else {
+			metrics.IngestFailure(failureReason(err))
+		}
 		return err
 	}
 	if h.after != nil {
@@ -246,14 +255,14 @@ func (h *Handler) appendLocked(ctx context.Context, in *WireEvent) error {
 	return nil
 }
 
-// failureReason maps an append error to a low-cardinality metric label,
-// mirroring writeAppendError's HTTP-status classification.
+// failureReason maps an append error to a low-cardinality metric label.
+// ErrDuplicate is deliberately absent: dedup skips are not failures and are
+// counted on the events_deduped series by Append (see ADR 0014). Every other
+// error classifies here, mirroring writeAppendError's HTTP-status split.
 func failureReason(err error) string {
 	switch {
 	case errors.Is(err, errMissingField), errors.Is(err, errInvalidKind):
 		return "validation"
-	case errors.Is(err, store.ErrDuplicate):
-		return "duplicate"
 	default:
 		return "store"
 	}
