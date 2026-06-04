@@ -28,6 +28,13 @@ type Event struct {
 	Refs      []string       `json:"refs"`
 	Hash      string         `json:"hash"`
 	PrevHash  *string        `json:"prevHash,omitempty"`
+	// Producer-supplied per-event ULID dedup key (ADR 0014). Distinct from
+	// `id` (the server-assigned ordering / hash-chain anchor): this is the
+	// value that survives a fallback replay so the server can drop a re-POST.
+	// Null for pre-0014 events and webhook deliveries without an
+	// Idempotency-Key header. Events dropped as duplicates have no row to
+	// query — "what got deduped" lives only in the server's skip logs.
+	IdempotencyKey *string `json:"idempotencyKey,omitempty"`
 	// All links touching this event in either direction (from/to).
 	Links []*Link `json:"links"`
 	// Token usage of the assistant message that derived this event. Present

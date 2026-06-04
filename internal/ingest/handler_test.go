@@ -88,12 +88,15 @@ func TestIngestRejectsMissingFields(t *testing.T) {
 	}
 }
 
-func TestIngestPreservesSubmittedID(t *testing.T) {
+// TestIngestOverridesSubmittedID locks ADR 0014 D1: id is ALWAYS
+// server-assigned, even when the client supplies one. The submitted id
+// is ignored; the producer's idempotency_key is what's preserved.
+func TestIngestOverridesSubmittedID(t *testing.T) {
 	st := store.NewMemory()
 	srv := httptest.NewServer(NewRouter(st))
 	defer srv.Close()
 
-	body := `{"id":"01HSAMPLE","session_id":"s2","actor":{"type":"human","id":"alice"},"kind":"prompt"}`
+	body := `{"id":"01HSAMPLE","idempotency_key":"key-sample","session_id":"s2","actor":{"type":"human","id":"alice"},"kind":"prompt"}`
 	resp, err := http.Post(srv.URL+"/events", "application/x-ndjson", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("post: %v", err)
@@ -103,12 +106,23 @@ func TestIngestPreservesSubmittedID(t *testing.T) {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
 
-	got, err := st.GetEvent(context.Background(), "01HSAMPLE")
-	if err != nil {
-		t.Fatalf("get: %v", err)
+	// The client-supplied id must NOT be used.
+	if _, err := st.GetEvent(context.Background(), "01HSAMPLE"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("GetEvent(submitted id) err = %v, want ErrNotFound (id should be server-assigned)", err)
 	}
-	if got.ID != "01HSAMPLE" {
-		t.Errorf("id = %q, want %q", got.ID, "01HSAMPLE")
+
+	events, err := st.ListBySession(context.Background(), "s2", 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("stored %d events, want 1", len(events))
+	}
+	if events[0].ID == "01HSAMPLE" || events[0].ID == "" {
+		t.Errorf("id = %q, want a fresh server-assigned ULID", events[0].ID)
+	}
+	if events[0].IdempotencyKey != "key-sample" {
+		t.Errorf("idempotency_key = %q, want %q", events[0].IdempotencyKey, "key-sample")
 	}
 }
 
@@ -235,12 +249,17 @@ func TestIngestConcurrentWritesPreserveChain(t *testing.T) {
 	}
 }
 
-func TestIngestReturns409OnDuplicateID(t *testing.T) {
+// TestIngestDedupesOnIdempotencyKey locks ADR 0014 D3: re-POSTing an
+// event with an already-seen idempotency_key is a no-op — the server
+// returns 200 (not 409) and reports accepted:0 (the actual inserted
+// count, which excludes the skipped duplicate). This is the HTTP
+// contract flip that makes `replay` safe to re-run.
+func TestIngestDedupesOnIdempotencyKey(t *testing.T) {
 	st := store.NewMemory()
 	srv := httptest.NewServer(NewRouter(st))
 	defer srv.Close()
 
-	body := `{"id":"01HDUPEVENT","session_id":"s1","actor":{"type":"human","id":"alice"},"kind":"prompt"}`
+	body := `{"idempotency_key":"01HDUPKEY","session_id":"s1","actor":{"type":"human","id":"alice"},"kind":"prompt"}`
 	resp, err := http.Post(srv.URL+"/events", "application/x-ndjson", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("first post: %v", err)
@@ -252,12 +271,19 @@ func TestIngestReturns409OnDuplicateID(t *testing.T) {
 		t.Fatalf("second post: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusConflict {
-		t.Errorf("status = %d, want 409", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200 (dedup skip, not 409)", resp.StatusCode)
+	}
+	var got struct{ Accepted int }
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Accepted != 0 {
+		t.Errorf("accepted = %d, want 0 (duplicate skipped)", got.Accepted)
 	}
 
 	// Sanity: the store still has exactly one event for the session, and
-	// the head-cache wasn't advanced past the failed insert.
+	// the head-cache wasn't advanced past the skipped insert.
 	events, err := st.ListBySession(context.Background(), "s1", 0)
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -267,6 +293,49 @@ func TestIngestReturns409OnDuplicateID(t *testing.T) {
 	}
 }
 
+// TestIngestMixedBatchSkipsDupKeepsRest verifies a batch that contains a
+// duplicate continues past it (ADR 0014 D3): the dup is skipped, fresh
+// lines still land, and accepted reflects only the inserts.
+func TestIngestMixedBatchSkipsDupKeepsRest(t *testing.T) {
+	st := store.NewMemory()
+	srv := httptest.NewServer(NewRouter(st))
+	defer srv.Close()
+
+	first := `{"idempotency_key":"k1","session_id":"sm","actor":{"type":"human","id":"alice"},"kind":"prompt"}`
+	if resp, err := http.Post(srv.URL+"/events", "application/x-ndjson", strings.NewReader(first)); err != nil {
+		t.Fatalf("seed post: %v", err)
+	} else {
+		resp.Body.Close()
+	}
+
+	// Batch: k1 (dup) then k2 (new). Expect accepted:1, two events total.
+	batch := strings.Join([]string{
+		first,
+		`{"idempotency_key":"k2","session_id":"sm","actor":{"type":"agent","id":"claude-code"},"kind":"thought"}`,
+	}, "\n")
+	resp, err := http.Post(srv.URL+"/events", "application/x-ndjson", strings.NewReader(batch))
+	if err != nil {
+		t.Fatalf("batch post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got struct{ Accepted int }
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Accepted != 1 {
+		t.Errorf("accepted = %d, want 1 (k1 skipped, k2 inserted)", got.Accepted)
+	}
+	events, err := st.ListBySession(context.Background(), "sm", 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(events) != 2 {
+		t.Errorf("stored %d events, want 2", len(events))
+	}
+}
 
 // TestAppendDirectChainsAndDedupes exercises the public Handler.Append
 // contract: chained writes preserve the per-session head, validation
@@ -278,16 +347,16 @@ func TestAppendDirectChainsAndDedupes(t *testing.T) {
 	ctx := context.Background()
 
 	a := &WireEvent{
-		ID:        "01HAPPENDA",
-		SessionID: "s-direct",
-		Actor:     WireActor{Type: "human", ID: "alice"},
-		Kind:      "prompt",
+		IdempotencyKey: "key-a",
+		SessionID:      "s-direct",
+		Actor:          WireActor{Type: "human", ID: "alice"},
+		Kind:           "prompt",
 	}
 	b := &WireEvent{
-		ID:        "01HAPPENDB",
-		SessionID: "s-direct",
-		Actor:     WireActor{Type: "human", ID: "alice"},
-		Kind:      "prompt",
+		IdempotencyKey: "key-b",
+		SessionID:      "s-direct",
+		Actor:          WireActor{Type: "human", ID: "alice"},
+		Kind:           "prompt",
 	}
 	if err := h.Append(ctx, a); err != nil {
 		t.Fatalf("append a: %v", err)
@@ -317,18 +386,24 @@ func TestAppendDirectChainsAndDedupes(t *testing.T) {
 		t.Errorf("invalid kind err = %v, want errInvalidKind", err)
 	}
 
-	// Duplicate ID returns ErrDuplicate; head cache must not advance
-	// past the failed insert.
-	dup := *a
-	if err := h.Append(ctx, &dup); !errors.Is(err, store.ErrDuplicate) {
-		t.Errorf("duplicate id err = %v, want ErrDuplicate", err)
+	// A re-sent event (same idempotency_key) returns ErrDuplicate; the
+	// head cache must not advance past the skipped insert. Note id is
+	// always server-assigned, so dedup rides the key, not the id.
+	dup := &WireEvent{
+		IdempotencyKey: "key-a",
+		SessionID:      "s-direct",
+		Actor:          WireActor{Type: "human", ID: "alice"},
+		Kind:           "prompt",
+	}
+	if err := h.Append(ctx, dup); !errors.Is(err, store.ErrDuplicate) {
+		t.Errorf("duplicate key err = %v, want ErrDuplicate", err)
 	}
 
 	c := &WireEvent{
-		ID:        "01HAPPENDC",
-		SessionID: "s-direct",
-		Actor:     WireActor{Type: "human", ID: "alice"},
-		Kind:      "prompt",
+		IdempotencyKey: "key-c",
+		SessionID:      "s-direct",
+		Actor:          WireActor{Type: "human", ID: "alice"},
+		Kind:           "prompt",
 	}
 	if err := h.Append(ctx, c); err != nil {
 		t.Fatalf("append c: %v", err)

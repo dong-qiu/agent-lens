@@ -41,6 +41,10 @@ func toGQLEvent(se *store.Event) *Event {
 		p := se.PrevHash
 		ev.PrevHash = &p
 	}
+	if se.IdempotencyKey != "" {
+		k := se.IdempotencyKey
+		ev.IdempotencyKey = &k
+	}
 	if len(se.Payload) > 0 {
 		var p map[string]any
 		if err := json.Unmarshal(se.Payload, &p); err == nil {
@@ -91,10 +95,10 @@ func toGQLLink(l *store.Link) *Link {
 // Adding a new TokenUsage field requires touching FOUR places, kept
 // in lock-step intentionally so a stale producer / consumer / shape
 // fails loudly rather than dropping data:
-//   1. internal/transcript/reader.go           — TokenUsage struct + extractUsage mapping (producer)
-//   2. internal/query/mapper.go (this file)    — wireUsage struct + decodePayloadUsage assignment + aggregateSessionUsage accumulator
-//   3. internal/query/schema.graphql           — TokenUsage type (regen via `make gqlgen`)
-//   4. web/src/types.ts + UI chips             — TokenUsage type + chip / tooltip rendering
+//  1. internal/transcript/reader.go           — TokenUsage struct + extractUsage mapping (producer)
+//  2. internal/query/mapper.go (this file)    — wireUsage struct + decodePayloadUsage assignment + aggregateSessionUsage accumulator
+//  3. internal/query/schema.graphql           — TokenUsage type (regen via `make gqlgen`)
+//  4. web/src/types.ts + UI chips             — TokenUsage type + chip / tooltip rendering
 //
 // TestTokenUsageGraphQLShape catches drift on (3); the others rely on
 // build-time field alignment between wireUsage / TokenUsage. Keep

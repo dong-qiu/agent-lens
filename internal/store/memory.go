@@ -13,12 +13,18 @@ type Memory struct {
 	mu     sync.Mutex
 	events []*Event
 	byID   map[string]*Event
-	links  map[string]Link // key: from|to|relation
+	// byKey indexes events by idempotency_key for dedup (ADR 0014 D5).
+	// Distinct from byID: ids are now always unique server ULIDs, so byID
+	// no longer detects the duplicates the webhook-redelivery / replay
+	// paths produce — only byKey does. Keyless events are absent here.
+	byKey map[string]*Event
+	links map[string]Link // key: from|to|relation
 }
 
 func NewMemory() *Memory {
 	return &Memory{
 		byID:  map[string]*Event{},
+		byKey: map[string]*Event{},
 		links: map[string]Link{},
 	}
 }
@@ -52,12 +58,26 @@ func (m *Memory) Close() error { return nil }
 func (m *Memory) AppendEvent(_ context.Context, e *Event) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Dedup on idempotency_key (ADR 0014 D3/D5): a non-empty key already
+	// seen is the expected replay / webhook-redelivery duplicate. Keyless
+	// events (empty key) are never deduped, mirroring Postgres's partial
+	// unique index that excludes NULL keys.
+	if e.IdempotencyKey != "" {
+		if _, exists := m.byKey[e.IdempotencyKey]; exists {
+			return ErrDuplicate
+		}
+	}
+	// id collisions remain a should-not-happen bug (ids are fresh server
+	// ULIDs); keep rejecting them to mirror the Postgres PRIMARY KEY.
 	if _, exists := m.byID[e.ID]; exists {
 		return ErrDuplicate
 	}
 	cp := *e
 	m.events = append(m.events, &cp)
 	m.byID[cp.ID] = &cp
+	if cp.IdempotencyKey != "" {
+		m.byKey[cp.IdempotencyKey] = &cp
+	}
 	return nil
 }
 

@@ -40,16 +40,18 @@ Example:
   agent-lens-hook replay --dry-run
   agent-lens-hook replay --remove-on-success --url http://localhost:8787
 
-Important — re-running creates duplicates in v0.1:
+Important — --remove-on-success is still required during the upgrade window:
 
-  v0.1 ingest does not dedup on event ULID; the server overrides the
-  client-supplied id with a fresh server-side ULID on every POST. So
-  re-running replay over a file that was already accepted will insert
-  duplicate events into the database (visible as doubled event counts
-  in Lens UI / GraphQL).
+  The server now dedups on a per-event idempotency key (ADR 0014): for
+  events produced by an up-to-date hook, re-running replay over an
+  already-accepted file is a no-op — the server returns 200 and skips the
+  duplicates (accepted: 0).
 
-  Always use --remove-on-success unless you have an independent
-  idempotency control. Tracking issue: #81.
+  But fallback files written before the hook gained the key carry no key,
+  so they are NOT deduplicated and re-running replay over them WILL insert
+  duplicates. A single replay run can mix old (keyless) and new files, so
+  until you're certain no pre-upgrade files remain on disk, keep using
+  --remove-on-success. Tracking issue: #81.
 `
 
 func runReplay(args []string) {

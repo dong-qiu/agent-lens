@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/oklog/ulid/v2"
 )
 
 // runGitPostCommit is invoked from a git post-commit hook (typically
@@ -66,6 +68,9 @@ func buildGitCommitEvent(workdir string) (map[string]any, error) {
 		"session_id": gitSessionID(repo),
 		"actor":      map[string]any{"type": "human", "id": email},
 		"kind":       "commit",
+		// Per-event dedup key (ADR 0014 D2): like baseEvent, generated at
+		// build time so a replay of the frozen fallback file is idempotent.
+		"idempotency_key": ulid.Make().String(),
 		"payload": map[string]any{
 			"sha":     sha,
 			"subject": subject,

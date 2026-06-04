@@ -85,8 +85,11 @@ func TestMapPullRequestSetsDerivedFields(t *testing.T) {
 	if ev.SessionID != "github-pr:acme/widget/42" {
 		t.Errorf("session_id = %q (must use slash-separated number, not #)", ev.SessionID)
 	}
-	if ev.ID != sampleDeliveryID {
-		t.Errorf("id = %q, want delivery uuid %q", ev.ID, sampleDeliveryID)
+	if ev.IdempotencyKey != sampleDeliveryID {
+		t.Errorf("idempotency_key = %q, want delivery uuid %q", ev.IdempotencyKey, sampleDeliveryID)
+	}
+	if ev.ID != "" {
+		t.Errorf("id = %q, want empty (server assigns the id, ADR 0014)", ev.ID)
 	}
 	if ev.Actor.Type != "human" || ev.Actor.ID != "alice" {
 		t.Errorf("actor = %+v", ev.Actor)
@@ -155,8 +158,11 @@ func TestHandlerHappyPath(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].ID != sampleDeliveryID {
-		t.Errorf("event id = %q, want %q", events[0].ID, sampleDeliveryID)
+	if events[0].IdempotencyKey != sampleDeliveryID {
+		t.Errorf("event idempotency_key = %q, want %q", events[0].IdempotencyKey, sampleDeliveryID)
+	}
+	if events[0].ID == "" || events[0].ID == sampleDeliveryID {
+		t.Errorf("event id = %q, want a server-assigned ULID distinct from the delivery uuid", events[0].ID)
 	}
 	if events[0].Kind != "pr" {
 		t.Errorf("event kind = %q", events[0].Kind)
@@ -311,8 +317,8 @@ func TestMapPullRequestReview(t *testing.T) {
 	if ev.SessionID != "github-pr:acme/widget/42" {
 		t.Errorf("session_id = %q (must match the PR's session)", ev.SessionID)
 	}
-	if ev.ID != "delivery-review-1" {
-		t.Errorf("id = %q, want delivery", ev.ID)
+	if ev.IdempotencyKey != "delivery-review-1" {
+		t.Errorf("idempotency_key = %q, want delivery", ev.IdempotencyKey)
 	}
 	if ev.Actor.ID != "bob" {
 		t.Errorf("actor.id = %q, want bob", ev.Actor.ID)
@@ -539,8 +545,8 @@ func TestMapWorkflowRun(t *testing.T) {
 	if ev.SessionID != "github-build:acme/widget/123456789" {
 		t.Errorf("session_id = %q (must key on run id)", ev.SessionID)
 	}
-	if ev.ID != "delivery-wf-1" {
-		t.Errorf("id = %q, want delivery", ev.ID)
+	if ev.IdempotencyKey != "delivery-wf-1" {
+		t.Errorf("idempotency_key = %q, want delivery", ev.IdempotencyKey)
 	}
 	if ev.Actor.Type != "system" {
 		t.Errorf("actor.type = %q, want system", ev.Actor.Type)

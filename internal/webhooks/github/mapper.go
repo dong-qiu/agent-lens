@@ -34,8 +34,9 @@ type pullRequestPayload struct {
 
 // mapPullRequest derives a wire event from a `pull_request` webhook
 // body. deliveryID (from the X-GitHub-Delivery header) is set as the
-// event ID so duplicate deliveries hit ErrDuplicate at the store
-// layer; if empty, the ingest pipeline assigns a ULID.
+// event's idempotency_key so a GitHub redelivery hits ErrDuplicate at
+// the store layer (ADR 0014 D2/D5); the `id` is always server-assigned.
+// If deliveryID is empty the delivery is not deduplicated.
 //
 // session_id: `github-pr:<owner>/<repo>/<number>`. Slashes are
 // query-string-safe, so the format survives `?session=...` in the
@@ -61,9 +62,9 @@ func mapPullRequest(raw json.RawMessage, deliveryID string) (*ingest.WireEvent, 
 	}
 
 	return &ingest.WireEvent{
-		ID:        deliveryID,
-		TS:        time.Now().UTC(),
-		SessionID: fmt.Sprintf("github-pr:%s/%d", p.Repository.FullName, p.Number),
+		IdempotencyKey: deliveryID,
+		TS:             time.Now().UTC(),
+		SessionID:      fmt.Sprintf("github-pr:%s/%d", p.Repository.FullName, p.Number),
 		Actor: ingest.WireActor{
 			Type: "human",
 			ID:   actorID,
@@ -117,9 +118,9 @@ func mapPullRequestReview(raw json.RawMessage, deliveryID string) (*ingest.WireE
 	}
 
 	return &ingest.WireEvent{
-		ID:        deliveryID,
-		TS:        time.Now().UTC(),
-		SessionID: fmt.Sprintf("github-pr:%s/%d", p.Repository.FullName, p.PullRequest.Number),
+		IdempotencyKey: deliveryID,
+		TS:             time.Now().UTC(),
+		SessionID:      fmt.Sprintf("github-pr:%s/%d", p.Repository.FullName, p.PullRequest.Number),
 		Actor: ingest.WireActor{
 			Type: "human",
 			ID:   actorID,
@@ -202,9 +203,9 @@ func mapPush(raw json.RawMessage, deliveryID string) (*ingest.WireEvent, error) 
 	}
 
 	return &ingest.WireEvent{
-		ID:        deliveryID,
-		TS:        time.Now().UTC(),
-		SessionID: fmt.Sprintf("github-push:%s/%s", p.Repository.FullName, branch),
+		IdempotencyKey: deliveryID,
+		TS:             time.Now().UTC(),
+		SessionID:      fmt.Sprintf("github-push:%s/%s", p.Repository.FullName, branch),
 		Actor: ingest.WireActor{
 			Type: "human",
 			ID:   actorID,
@@ -262,9 +263,9 @@ func mapWorkflowRun(raw json.RawMessage, deliveryID string) (*ingest.WireEvent, 
 	}
 
 	return &ingest.WireEvent{
-		ID:        deliveryID,
-		TS:        time.Now().UTC(),
-		SessionID: fmt.Sprintf("github-build:%s/%d", p.Repository.FullName, p.WorkflowRun.ID),
+		IdempotencyKey: deliveryID,
+		TS:             time.Now().UTC(),
+		SessionID:      fmt.Sprintf("github-build:%s/%d", p.Repository.FullName, p.WorkflowRun.ID),
 		Actor: ingest.WireActor{
 			Type: "system",
 			ID:   actorID,

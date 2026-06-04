@@ -44,20 +44,21 @@ type ComplexityRoot struct {
 	}
 
 	Event struct {
-		Actor      func(childComplexity int) int
-		Hash       func(childComplexity int) int
-		ID         func(childComplexity int) int
-		Kind       func(childComplexity int) int
-		Links      func(childComplexity int) int
-		Parents    func(childComplexity int) int
-		Payload    func(childComplexity int) int
-		PrevHash   func(childComplexity int) int
-		Refs       func(childComplexity int) int
-		SessionID  func(childComplexity int) int
-		StopReason func(childComplexity int) int
-		Ts         func(childComplexity int) int
-		TurnID     func(childComplexity int) int
-		Usage      func(childComplexity int) int
+		Actor          func(childComplexity int) int
+		Hash           func(childComplexity int) int
+		ID             func(childComplexity int) int
+		IdempotencyKey func(childComplexity int) int
+		Kind           func(childComplexity int) int
+		Links          func(childComplexity int) int
+		Parents        func(childComplexity int) int
+		Payload        func(childComplexity int) int
+		PrevHash       func(childComplexity int) int
+		Refs           func(childComplexity int) int
+		SessionID      func(childComplexity int) int
+		StopReason     func(childComplexity int) int
+		Ts             func(childComplexity int) int
+		TurnID         func(childComplexity int) int
+		Usage          func(childComplexity int) int
 	}
 
 	Link struct {
@@ -162,6 +163,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Event.ID(childComplexity), true
+	case "Event.idempotencyKey":
+		if e.ComplexityRoot.Event.IdempotencyKey == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Event.IdempotencyKey(childComplexity), true
 	case "Event.kind":
 		if e.ComplexityRoot.Event.Kind == nil {
 			break
@@ -531,6 +538,8 @@ func (ec *executionContext) childFields_Event(ctx context.Context, field graphql
 		return ec.fieldContext_Event_hash(ctx, field)
 	case "prevHash":
 		return ec.fieldContext_Event_prevHash(ctx, field)
+	case "idempotencyKey":
+		return ec.fieldContext_Event_idempotencyKey(ctx, field)
 	case "links":
 		return ec.fieldContext_Event_links(ctx, field)
 	case "usage":
@@ -1223,6 +1232,29 @@ func (ec *executionContext) _Event_prevHash(ctx context.Context, field graphql.C
 	)
 }
 func (ec *executionContext) fieldContext_Event_prevHash(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Event", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Event_idempotencyKey(ctx context.Context, field graphql.CollectedField, obj *Event) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Event_idempotencyKey(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.IdempotencyKey, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Event_idempotencyKey(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("Event", field, false, false, errors.New("field of type String does not have child fields"))
 }
 
@@ -3248,6 +3280,8 @@ func (ec *executionContext) _Event(ctx context.Context, sel ast.SelectionSet, ob
 			}
 		case "prevHash":
 			out.Values[i] = ec._Event_prevHash(ctx, field, obj)
+		case "idempotencyKey":
+			out.Values[i] = ec._Event_idempotencyKey(ctx, field, obj)
 		case "links":
 			field := field
 

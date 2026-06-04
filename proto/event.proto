@@ -22,6 +22,12 @@ message Event {
   string hash = 10;                           // hash(serialized event - hash - sig)
   string prev_hash = 11;                      // hash of previous event in chain
   bytes sig = 12;                             // optional ed25519 signature
+  // Producer-generated per-event ULID used solely as the dedup key (ADR
+  // 0014). Decoupled from `id`: `id` is the server-assigned ordering /
+  // hash-chain anchor, `idempotency_key` is what survives a replay so the
+  // server can drop a re-POSTed event. NULL/empty for pre-0014 events and
+  // for webhook deliveries without an Idempotency-Key header.
+  string idempotency_key = 13;
 }
 
 message Actor {

@@ -13,6 +13,15 @@ type Event {
   refs: [ID!]!
   hash: String!
   prevHash: String
+  """
+  Producer-supplied per-event ULID dedup key (ADR 0014). Distinct from
+  `id` (the server-assigned ordering / hash-chain anchor): this is the
+  value that survives a fallback replay so the server can drop a re-POST.
+  Null for pre-0014 events and webhook deliveries without an
+  Idempotency-Key header. Events dropped as duplicates have no row to
+  query — "what got deduped" lives only in the server's skip logs.
+  """
+  idempotencyKey: String
   """All links touching this event in either direction (from/to)."""
   links: [Link!]!
   """
