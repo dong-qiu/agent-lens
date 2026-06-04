@@ -46,8 +46,11 @@ func TestMapDeployHappyPath(t *testing.T) {
 	if ev.SessionID != "deploy:production" {
 		t.Errorf("session_id = %q (must be per-environment)", ev.SessionID)
 	}
-	if ev.ID != "deploy-1" {
-		t.Errorf("id = %q, want deploy-1", ev.ID)
+	if ev.IdempotencyKey != "deploy-1" {
+		t.Errorf("idempotency_key = %q, want deploy-1", ev.IdempotencyKey)
+	}
+	if ev.ID != "" {
+		t.Errorf("id = %q, want empty (server assigns the id, ADR 0014)", ev.ID)
 	}
 	if ev.Actor.Type != "system" || ev.Actor.ID != "alice" {
 		t.Errorf("actor = %+v", ev.Actor)
@@ -112,8 +115,11 @@ func TestHandlerHappyPath(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].ID != "deploy-key-1" {
-		t.Errorf("event id = %q, want idempotency key", events[0].ID)
+	if events[0].IdempotencyKey != "deploy-key-1" {
+		t.Errorf("event idempotency_key = %q, want %q", events[0].IdempotencyKey, "deploy-key-1")
+	}
+	if events[0].ID == "" || events[0].ID == "deploy-key-1" {
+		t.Errorf("event id = %q, want a server-assigned ULID distinct from the key", events[0].ID)
 	}
 }
 

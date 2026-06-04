@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oklog/ulid/v2"
+
 	"github.com/dong-qiu/agent-lens/internal/redact"
 	"github.com/dong-qiu/agent-lens/internal/transcript"
 )
@@ -544,6 +546,13 @@ func baseEvent(in *claudeHookInput, actor map[string]any, kind string, payload m
 		"actor":      actor,
 		"kind":       kind,
 		"payload":    payload,
+		// Per-event ULID dedup key (ADR 0014 D2). Generated here, once per
+		// event — so a Stop that emits several thinking/text/turn_end events
+		// in one hook call gets a distinct key each — and carried verbatim
+		// through transport and the NDJSON fallback sink, so a replay re-POSTs
+		// the same key and the server drops the duplicate. The server still
+		// assigns the ordering/hash-chain `id`; this never becomes the id.
+		"idempotency_key": ulid.Make().String(),
 	}
 }
 

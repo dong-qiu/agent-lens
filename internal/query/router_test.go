@@ -60,10 +60,10 @@ func TestVerticalSliceIngestThenQuery(t *testing.T) {
 	var got struct {
 		Data struct {
 			Events []struct {
-				ID    string         `json:"id"`
-				Kind  string         `json:"kind"`
-				Actor struct{ Type, Model string } `json:"actor"`
-				Payload map[string]any `json:"payload"`
+				ID      string                       `json:"id"`
+				Kind    string                       `json:"kind"`
+				Actor   struct{ Type, Model string } `json:"actor"`
+				Payload map[string]any               `json:"payload"`
 			} `json:"events"`
 		} `json:"data"`
 		Errors []map[string]any `json:"errors"`
@@ -279,7 +279,6 @@ func TestEventLinksResolver(t *testing.T) {
 		t.Errorf("inferred_by = %q", link.InferredBy)
 	}
 }
-
 
 // TestLinkedEventsResolver covers the BFS by session id: two sessions
 // share a `git:<sha>` ref; the linker emits a cross-session link. A
@@ -756,11 +755,12 @@ func TestEventLinksDataLoaderBatches(t *testing.T) {
 	srv := httptest.NewServer(r)
 	defer srv.Close()
 
-	// Five events in one session with explicit ids so we can link two of them.
+	// Five events in one session. Ids are server-assigned (ADR 0014), so we
+	// read them back after ingest and link two of them by their real ids.
 	lines := make([]string, 0, 5)
 	for i := 0; i < 5; i++ {
 		lines = append(lines, fmt.Sprintf(
-			`{"id":"01EVT%d","session_id":"s1","actor":{"type":"agent","id":"c"},"kind":"tool_call","payload":{"name":"E%d"}}`, i, i))
+			`{"session_id":"s1","actor":{"type":"agent","id":"c"},"kind":"tool_call","payload":{"name":"E%d"}}`, i))
 	}
 	resp, err := http.Post(srv.URL+"/v1/events", "application/x-ndjson", strings.NewReader(strings.Join(lines, "\n")))
 	if err != nil {
@@ -771,8 +771,17 @@ func TestEventLinksDataLoaderBatches(t *testing.T) {
 		t.Fatalf("ingest status = %d, want 200", resp.StatusCode)
 	}
 
+	seeded, err := st.ListBySession(context.Background(), "s1", 0)
+	if err != nil {
+		t.Fatalf("list seeded: %v", err)
+	}
+	if len(seeded) != 5 {
+		t.Fatalf("seeded %d events, want 5", len(seeded))
+	}
+	evt0, evt1, evt2 := seeded[0].ID, seeded[1].ID, seeded[2].ID
+
 	if err := st.AppendLink(context.Background(), &store.Link{
-		FromEvent: "01EVT0", ToEvent: "01EVT1", Relation: "references", Confidence: 1, InferredBy: "test",
+		FromEvent: evt0, ToEvent: evt1, Relation: "references", Confidence: 1, InferredBy: "test",
 	}); err != nil {
 		t.Fatalf("AppendLink: %v", err)
 	}
@@ -817,10 +826,10 @@ func TestEventLinksDataLoaderBatches(t *testing.T) {
 	for _, e := range got.Data.Events {
 		links[e.ID] = len(e.Links)
 	}
-	if links["01EVT0"] != 1 || links["01EVT1"] != 1 {
-		t.Errorf("linked endpoints: 01EVT0=%d 01EVT1=%d, want 1 each", links["01EVT0"], links["01EVT1"])
+	if links[evt0] != 1 || links[evt1] != 1 {
+		t.Errorf("linked endpoints: %s=%d %s=%d, want 1 each", evt0, links[evt0], evt1, links[evt1])
 	}
-	if links["01EVT2"] != 0 {
-		t.Errorf("unlinked event 01EVT2 has %d links, want 0", links["01EVT2"])
+	if links[evt2] != 0 {
+		t.Errorf("unlinked event %s has %d links, want 0", evt2, links[evt2])
 	}
 }

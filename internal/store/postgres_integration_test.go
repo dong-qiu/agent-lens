@@ -176,6 +176,51 @@ func TestPostgresRejectsDuplicateID(t *testing.T) {
 	}
 }
 
+// TestPostgresDedupesOnIdempotencyKey locks ADR 0014 D3/D5 against the
+// real backend: two events with DISTINCT ids but the SAME non-empty
+// idempotency_key — the replay / webhook-redelivery shape — must collapse
+// to one row (ON CONFLICT DO NOTHING → ErrDuplicate), while keyless
+// events with distinct ids both insert (the partial unique index excludes
+// NULL). Memory mirrors this; see the ingest/webhook handler tests.
+func TestPostgresDedupesOnIdempotencyKey(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := openPostgresWithSchema(ctx, t)
+	defer cleanup()
+
+	mk := func(id, key string) *Event {
+		return &Event{
+			ID: id, TS: time.Now().UTC(), SessionID: "s-key",
+			ActorType: "system", ActorID: "deploy", Kind: "deploy",
+			Hash: id, IdempotencyKey: key,
+		}
+	}
+
+	// Same key, different ids → second is a dropped duplicate.
+	if err := st.AppendEvent(ctx, mk("01KEYAAAA", "dup-key")); err != nil {
+		t.Fatalf("first keyed append: %v", err)
+	}
+	if err := st.AppendEvent(ctx, mk("01KEYBBBB", "dup-key")); !errors.Is(err, ErrDuplicate) {
+		t.Errorf("second keyed append err = %v, want ErrDuplicate", err)
+	}
+
+	// Keyless events (NULL key) are never deduped, even with distinct ids.
+	if err := st.AppendEvent(ctx, mk("01NULLAAA", "")); err != nil {
+		t.Fatalf("first keyless append: %v", err)
+	}
+	if err := st.AppendEvent(ctx, mk("01NULLBBB", "")); err != nil {
+		t.Errorf("second keyless append err = %v, want success (NULL keys don't conflict)", err)
+	}
+
+	got, err := st.ListBySession(ctx, "s-key", 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	// 1 keyed (dup dropped) + 2 keyless = 3.
+	if len(got) != 3 {
+		t.Errorf("stored %d events, want 3 (1 keyed survivor + 2 keyless)", len(got))
+	}
+}
+
 // openPostgresWithSchema is the shared setup used by the integration tests.
 // It spins up a fresh container, applies the embedded schema, and returns
 // the store along with a teardown.

@@ -97,15 +97,21 @@ func (h *Handler) AfterAppend(fn func(context.Context, *WireEvent)) {
 // proto/event.proto but uses json.RawMessage for payload so we don't
 // re-marshal user content before hashing.
 type WireEvent struct {
-	ID        string          `json:"id,omitempty"`
-	TS        time.Time       `json:"ts"`
-	SessionID string          `json:"session_id"`
-	TurnID    string          `json:"turn_id,omitempty"`
-	Actor     WireActor       `json:"actor"`
-	Kind      string          `json:"kind"`
-	Payload   json.RawMessage `json:"payload,omitempty"`
-	Parents   []string        `json:"parents,omitempty"`
-	Refs      []string        `json:"refs,omitempty"`
+	ID string `json:"id,omitempty"`
+	// IdempotencyKey is the producer's per-event dedup key (ADR 0014). It
+	// rides the wire and the NDJSON fallback sink so a replayed event keeps
+	// the same key and the server can drop the re-POST. omitempty keeps the
+	// canonical (hashed) form byte-identical to the pre-0014 shape for
+	// keyless events, so their hashes don't shift.
+	IdempotencyKey string          `json:"idempotency_key,omitempty"`
+	TS             time.Time       `json:"ts"`
+	SessionID      string          `json:"session_id"`
+	TurnID         string          `json:"turn_id,omitempty"`
+	Actor          WireActor       `json:"actor"`
+	Kind           string          `json:"kind"`
+	Payload        json.RawMessage `json:"payload,omitempty"`
+	Parents        []string        `json:"parents,omitempty"`
+	Refs           []string        `json:"refs,omitempty"`
 }
 
 type WireActor struct {
@@ -133,6 +139,17 @@ func (h *Handler) IngestNDJSON(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := h.Append(r.Context(), &ev); err != nil {
+			// A duplicate is the expected replay / retried-POST case (ADR
+			// 0014 D3): skip the line and keep going rather than failing the
+			// whole batch with 409. The key is a per-event ULID, so a
+			// collision means "this exact frozen event was re-sent" — never
+			// two different events — and dropping it is always correct.
+			if errors.Is(err, store.ErrDuplicate) {
+				slog.Info("ingest dedup skip",
+					"idempotency_key", ev.IdempotencyKey,
+					"session", ev.SessionID, "kind", ev.Kind)
+				continue
+			}
 			h.writeAppendError(w, err)
 			return
 		}
@@ -178,9 +195,12 @@ func (h *Handler) appendLocked(ctx context.Context, in *WireEvent) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if in.ID == "" {
-		in.ID = ulid.Make().String()
-	}
+	// id is ALWAYS server-assigned (ADR 0014 D1): it is the ordering +
+	// hash-chain head anchor, and chain integrity needs it monotonic in
+	// append order. A producer-supplied id (cross-process, clock-skewed)
+	// would let a late event get an id below the chain head and break the
+	// chain. Dedup rides idempotency_key instead, which never touches id.
+	in.ID = ulid.Make().String()
 	if in.TS.IsZero() {
 		in.TS = time.Now().UTC()
 	}
@@ -200,19 +220,20 @@ func (h *Handler) appendLocked(ctx context.Context, in *WireEvent) error {
 	hash := hashchain.Compute(prev, canonical)
 
 	ev := &store.Event{
-		ID:         in.ID,
-		TS:         in.TS,
-		SessionID:  in.SessionID,
-		TurnID:     in.TurnID,
-		ActorType:  in.Actor.Type,
-		ActorID:    in.Actor.ID,
-		ActorModel: in.Actor.Model,
-		Kind:       in.Kind,
-		Payload:    in.Payload,
-		Parents:    in.Parents,
-		Refs:       in.Refs,
-		Hash:       hash,
-		PrevHash:   prev,
+		ID:             in.ID,
+		TS:             in.TS,
+		SessionID:      in.SessionID,
+		TurnID:         in.TurnID,
+		ActorType:      in.Actor.Type,
+		ActorID:        in.Actor.ID,
+		ActorModel:     in.Actor.Model,
+		Kind:           in.Kind,
+		Payload:        in.Payload,
+		Parents:        in.Parents,
+		Refs:           in.Refs,
+		Hash:           hash,
+		PrevHash:       prev,
+		IdempotencyKey: in.IdempotencyKey,
 	}
 	if err := h.st.AppendEvent(ctx, ev); err != nil {
 		// Cache is intentionally not updated on append failure so the

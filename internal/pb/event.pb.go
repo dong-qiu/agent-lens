@@ -166,21 +166,27 @@ func (EventKind) EnumDescriptor() ([]byte, []int) {
 // Event is the canonical record for one observable action in the human-agent
 // coding pipeline. Events are append-only and form a hash chain via prev_hash.
 type Event struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // ULID
-	Ts            *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=ts,proto3" json:"ts,omitempty"`
-	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	TurnId        string                 `protobuf:"bytes,4,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
-	Actor         *Actor                 `protobuf:"bytes,5,opt,name=actor,proto3" json:"actor,omitempty"`
-	Kind          EventKind              `protobuf:"varint,6,opt,name=kind,proto3,enum=agentlens.v1.EventKind" json:"kind,omitempty"`
-	Payload       *structpb.Struct       `protobuf:"bytes,7,opt,name=payload,proto3" json:"payload,omitempty"`                    // kind-specific
-	Parents       []string               `protobuf:"bytes,8,rep,name=parents,proto3" json:"parents,omitempty"`                    // causal upstream event IDs
-	Refs          []string               `protobuf:"bytes,9,rep,name=refs,proto3" json:"refs,omitempty"`                          // referenced artifact IDs
-	Hash          string                 `protobuf:"bytes,10,opt,name=hash,proto3" json:"hash,omitempty"`                         // hash(serialized event - hash - sig)
-	PrevHash      string                 `protobuf:"bytes,11,opt,name=prev_hash,json=prevHash,proto3" json:"prev_hash,omitempty"` // hash of previous event in chain
-	Sig           []byte                 `protobuf:"bytes,12,opt,name=sig,proto3" json:"sig,omitempty"`                           // optional ed25519 signature
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Id        string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // ULID
+	Ts        *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=ts,proto3" json:"ts,omitempty"`
+	SessionId string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	TurnId    string                 `protobuf:"bytes,4,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
+	Actor     *Actor                 `protobuf:"bytes,5,opt,name=actor,proto3" json:"actor,omitempty"`
+	Kind      EventKind              `protobuf:"varint,6,opt,name=kind,proto3,enum=agentlens.v1.EventKind" json:"kind,omitempty"`
+	Payload   *structpb.Struct       `protobuf:"bytes,7,opt,name=payload,proto3" json:"payload,omitempty"`                    // kind-specific
+	Parents   []string               `protobuf:"bytes,8,rep,name=parents,proto3" json:"parents,omitempty"`                    // causal upstream event IDs
+	Refs      []string               `protobuf:"bytes,9,rep,name=refs,proto3" json:"refs,omitempty"`                          // referenced artifact IDs
+	Hash      string                 `protobuf:"bytes,10,opt,name=hash,proto3" json:"hash,omitempty"`                         // hash(serialized event - hash - sig)
+	PrevHash  string                 `protobuf:"bytes,11,opt,name=prev_hash,json=prevHash,proto3" json:"prev_hash,omitempty"` // hash of previous event in chain
+	Sig       []byte                 `protobuf:"bytes,12,opt,name=sig,proto3" json:"sig,omitempty"`                           // optional ed25519 signature
+	// Producer-generated per-event ULID used solely as the dedup key (ADR
+	// 0014). Decoupled from `id`: `id` is the server-assigned ordering /
+	// hash-chain anchor, `idempotency_key` is what survives a replay so the
+	// server can drop a re-POSTed event. NULL/empty for pre-0014 events and
+	// for webhook deliveries without an Idempotency-Key header.
+	IdempotencyKey string `protobuf:"bytes,13,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Event) Reset() {
@@ -297,6 +303,13 @@ func (x *Event) GetSig() []byte {
 	return nil
 }
 
+func (x *Event) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
 type Actor struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Type          ActorType              `protobuf:"varint,1,opt,name=type,proto3,enum=agentlens.v1.ActorType" json:"type,omitempty"`
@@ -361,7 +374,7 @@ var File_event_proto protoreflect.FileDescriptor
 
 const file_event_proto_rawDesc = "" +
 	"\n" +
-	"\vevent.proto\x12\fagentlens.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf7\x02\n" +
+	"\vevent.proto\x12\fagentlens.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa0\x03\n" +
 	"\x05Event\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12*\n" +
 	"\x02ts\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\x12\x1d\n" +
@@ -376,7 +389,8 @@ const file_event_proto_rawDesc = "" +
 	"\x04hash\x18\n" +
 	" \x01(\tR\x04hash\x12\x1b\n" +
 	"\tprev_hash\x18\v \x01(\tR\bprevHash\x12\x10\n" +
-	"\x03sig\x18\f \x01(\fR\x03sig\"Z\n" +
+	"\x03sig\x18\f \x01(\fR\x03sig\x12'\n" +
+	"\x0fidempotency_key\x18\r \x01(\tR\x0eidempotencyKey\"Z\n" +
 	"\x05Actor\x12+\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x17.agentlens.v1.ActorTypeR\x04type\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x14\n" +

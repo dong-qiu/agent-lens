@@ -7,27 +7,36 @@ import (
 )
 
 var (
-	ErrNotFound  = errors.New("event not found")
-	ErrDuplicate = errors.New("event id already exists")
+	ErrNotFound = errors.New("event not found")
+	// ErrDuplicate is returned when an append is rejected as a duplicate.
+	// Post-ADR-0014 the dedup axis is idempotency_key, not id: id is now
+	// always a fresh server ULID, so an id collision is a should-not-happen
+	// bug while a key collision is the expected replay / webhook-redelivery
+	// case the dedup exists to absorb.
+	ErrDuplicate = errors.New("event already exists")
 )
 
 // Event is the storage-layer representation. It mirrors proto/event.proto but
 // keeps payload as raw JSON so the store does not depend on generated pb.
 type Event struct {
-	ID        string
-	TS        time.Time
-	SessionID string
-	TurnID    string
-	ActorType string
-	ActorID   string
+	ID         string
+	TS         time.Time
+	SessionID  string
+	TurnID     string
+	ActorType  string
+	ActorID    string
 	ActorModel string
-	Kind      string
-	Payload   []byte // canonical JSON
-	Parents   []string
-	Refs      []string
-	Hash      string
-	PrevHash  string
-	Sig       []byte
+	Kind       string
+	Payload    []byte // canonical JSON
+	Parents    []string
+	Refs       []string
+	Hash       string
+	PrevHash   string
+	Sig        []byte
+	// IdempotencyKey is the producer-supplied per-event dedup key (ADR
+	// 0014). Empty for pre-0014 events and for webhook deliveries with no
+	// Idempotency-Key header; such events are never deduplicated.
+	IdempotencyKey string
 }
 
 // SessionSummary is an aggregated view of a single session: when it

@@ -73,21 +73,39 @@ func (p *Postgres) AppendEvent(ctx context.Context, e *Event) error {
 	const q = `
 		INSERT INTO events
 		  (id, ts, session_id, turn_id, actor_type, actor_id, actor_model,
-		   kind, payload, parents, refs, hash, prev_hash, sig)
+		   kind, payload, parents, refs, hash, prev_hash, sig, idempotency_key)
 		VALUES
-		  ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		  ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL
+		  DO NOTHING
 	`
-	_, err := p.pool.Exec(ctx, q,
+	// ON CONFLICT DO NOTHING (ADR 0014 D3) makes a re-POSTed event a no-op
+	// rather than an error: a duplicate idempotency_key inserts zero rows,
+	// which we report as ErrDuplicate so the HTTP path skips-and-continues
+	// instead of failing the batch. The conflict target carries the partial
+	// index's `WHERE idempotency_key IS NOT NULL` predicate so PG can infer
+	// the right (partial) unique index. A NULL key never conflicts, so
+	// keyless events always insert (RowsAffected == 1).
+	tag, err := p.pool.Exec(ctx, q,
 		e.ID, e.TS, e.SessionID, nullable(e.TurnID),
 		e.ActorType, e.ActorID, nullable(e.ActorModel),
 		e.Kind, e.Payload, emptyIfNil(e.Parents), emptyIfNil(e.Refs),
-		e.Hash, nullable(e.PrevHash), e.Sig,
+		e.Hash, nullable(e.PrevHash), e.Sig, nullable(e.IdempotencyKey),
 	)
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+	if err != nil {
+		// A PRIMARY KEY (id) violation still lands here, not via ON CONFLICT
+		// — ids are now always fresh server ULIDs, so this is a
+		// should-not-happen collision; surface it as ErrDuplicate too.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+			return ErrDuplicate
+		}
+		return err
+	}
+	if tag.RowsAffected() == 0 {
 		return ErrDuplicate
 	}
-	return err
+	return nil
 }
 
 func emptyIfNil(s []string) []string {
@@ -99,7 +117,7 @@ func emptyIfNil(s []string) []string {
 
 func (p *Postgres) GetEvent(ctx context.Context, id string) (*Event, error) {
 	const q = `SELECT id, ts, session_id, turn_id, actor_type, actor_id, actor_model,
-		kind, payload, parents, refs, hash, prev_hash, sig
+		kind, payload, parents, refs, hash, prev_hash, sig, idempotency_key
 		FROM events WHERE id = $1`
 	row := p.pool.QueryRow(ctx, q, id)
 	e, err := scanEvent(row)
@@ -116,7 +134,7 @@ func (p *Postgres) ListBySession(ctx context.Context, sessionID string, limit in
 	// already-appended event's ts — sorting by ts then walks the hash chain
 	// in the wrong order. See issue #38.
 	const q = `SELECT id, ts, session_id, turn_id, actor_type, actor_id, actor_model,
-		kind, payload, parents, refs, hash, prev_hash, sig
+		kind, payload, parents, refs, hash, prev_hash, sig, idempotency_key
 		FROM events WHERE session_id = $1 ORDER BY id ASC LIMIT $2`
 	// limit <= 0 means "no limit"; PG would otherwise treat 0 literally.
 	if limit <= 0 {
@@ -148,7 +166,7 @@ func (p *Postgres) EventsBeforeID(ctx context.Context, sessionID, eventID string
 	const q = `
 		WITH window_events AS (
 			SELECT id, ts, session_id, turn_id, actor_type, actor_id, actor_model,
-			       kind, payload, parents, refs, hash, prev_hash, sig
+			       kind, payload, parents, refs, hash, prev_hash, sig, idempotency_key
 			FROM events
 			WHERE session_id = $1 AND id < $2
 			ORDER BY id DESC
@@ -188,7 +206,7 @@ func (p *Postgres) HeadHash(ctx context.Context, sessionID string) (string, erro
 
 func (p *Postgres) EventsByRef(ctx context.Context, ref string) ([]*Event, error) {
 	const q = `SELECT id, ts, session_id, turn_id, actor_type, actor_id, actor_model,
-		kind, payload, parents, refs, hash, prev_hash, sig
+		kind, payload, parents, refs, hash, prev_hash, sig, idempotency_key
 		FROM events WHERE $1 = ANY(refs) ORDER BY ts ASC, id ASC`
 	rows, err := p.pool.Query(ctx, q, ref)
 	if err != nil {
@@ -340,11 +358,11 @@ type scanner interface {
 
 func scanEvent(s scanner) (*Event, error) {
 	var e Event
-	var turn, model, prev *string
+	var turn, model, prev, idemKey *string
 	if err := s.Scan(&e.ID, &e.TS, &e.SessionID, &turn,
 		&e.ActorType, &e.ActorID, &model,
 		&e.Kind, &e.Payload, &e.Parents, &e.Refs,
-		&e.Hash, &prev, &e.Sig); err != nil {
+		&e.Hash, &prev, &e.Sig, &idemKey); err != nil {
 		return nil, err
 	}
 	if turn != nil {
@@ -355,6 +373,9 @@ func scanEvent(s scanner) (*Event, error) {
 	}
 	if prev != nil {
 		e.PrevHash = *prev
+	}
+	if idemKey != nil {
+		e.IdempotencyKey = *idemKey
 	}
 	return &e, nil
 }

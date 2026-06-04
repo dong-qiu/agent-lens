@@ -109,9 +109,10 @@ func (h *Handler) forward(
 		slog.Info("github webhook accepted", "event", event, "delivery", deliveryID, "session", ev.SessionID)
 		w.WriteHeader(http.StatusAccepted)
 	case errors.Is(err, store.ErrDuplicate):
-		// GitHub redelivery: the delivery UUID is our event ID, so this
-		// is a true duplicate. Ack 200 so GitHub stops retrying without
-		// the operator seeing it as a webhook failure.
+		// GitHub redelivery: the delivery UUID is the event's
+		// idempotency_key (ADR 0014), so this is a true duplicate. Ack 200
+		// so GitHub stops retrying without the operator seeing it as a
+		// webhook failure.
 		slog.Info("github webhook duplicate", "event", event, "delivery", deliveryID, "session", ev.SessionID)
 		w.WriteHeader(http.StatusOK)
 	default:

@@ -1,7 +1,7 @@
 # ADR 0014:用每事件幂等键去重,与事件 id / 哈希链排序解耦
 
-- 状态:Accepted(设计锁定;**实现延后**——见 § 落地)
-- 日期:2026-06-03
+- 状态:Accepted + **Implemented**(2026-06-04,#81——见 § 落地 末「实现记录」)
+- 日期:2026-06-03(接受)/ 2026-06-04(落地)
 - 取代:—
 
 ## 背景
@@ -101,3 +101,17 @@
 **落地触发条件**(任一):dogfood 实际观测到重放重复;或第二个产出方需要跨路径去重;或着手做依赖"事件至多一条"的下游(如某些 linker 聚合)。届时按 § Scope 一个 PR 落,走**强制 `/review`**(触及 `internal/hashchain` 推理与 store)。本设计已经两轮独立检视(2026-06-03)。
 
 接受本 ADR 时,SPEC §7 把 `idempotency_key` 列为 `Event` 的(已接受、待落地)字段,与 0003–0005 EventKind "Accepted-but-unlanded" 同例;§10.1 标注"replay 幂等:设计已接受(ADR 0014),实现 gate 在 #81"。
+
+### 实现记录(2026-06-04,#81)
+
+落地触发为「主动前置消债」(D2/D3 早已两轮检视,且去重缺口已成 0010–0013 §后果反复引用的悬空承诺),按 § Scope 一个 PR 落,走强制 `/review`:
+
+- **schema/codegen**:`proto/event.proto` 增 `idempotency_key = 13`(`make proto`);`schema.graphql` 增 `idempotencyKey: String`(`make gqlgen`)。
+- **store**(D1/D3/D5):`store.Event.IdempotencyKey`;migration `0003_idempotency_key`(列 + **partial unique index** `WHERE idempotency_key IS NOT NULL`);postgres `AppendEvent` 走 `ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,`RowsAffected()==0`→`ErrDuplicate`,id PK 冲突仍 `ErrDuplicate`;memory 新增 `byKey` 索引去重;四个全列 SELECT + `scanEvent` 透出键。
+- **ingest**(D1/D3):`WireEvent.IdempotencyKey`(`omitempty`,使无键事件 canonical 不变);`id` **无条件**服务端 ULID(移除 `if in.ID==""`);`IngestNDJSON` 遇 `ErrDuplicate` **跳过续行 + 结构化日志**,`{accepted}` 为真实入库数;`/v1/events` 由 409 翻为 200。
+- **producers**(D2):hook `baseEvent` 每事件 `ulid.Make()` 填键;git post-commit 事件同样填键(也走 fallback/replay);GitHub 四个 mapper + deploy mapper 把 deliveryID / `Idempotency-Key` 头从 `id` 改挂 `idempotency_key`(顺带修 §验证 末条的 `id` 不变量违反)。
+- **replay/transport**(D4):`replayUsage` / `warnFallback` 措辞改为「升级后事件可安全重跑,过渡窗内仍须 `--remove-on-success`」;`postNDJSON` 本就以 2xx 为成功,200 `{accepted:0}` 自然成功,退出码语义无需改。
+- **query**(后果):`toGQLEvent` 透出 `idempotencyKey`。
+- **测试**:重写 `TestIngestOverridesSubmittedID`(id 必服务端赋)/ `TestIngestDedupesOnIdempotencyKey`(200+accepted:0)/ `TestIngestMixedBatchSkipsDupKeepsRest`;webhook redelivery 断言改 `idempotency_key`(D5 回归守卫);`TestEventLinksDataLoaderBatches` 改按服务端 id 建链;新增 `TestPostgresDedupesOnIdempotencyKey`(integration,需 Docker)。
+- **未验证**:postgres integration 测试因本机无 Docker 未实跑(代码 + `go vet -tags integration` 通过);`ON CONFLICT … WHERE … DO NOTHING` 的 partial-index 推理依赖 Postgres 标准语义。
+- **后续仍开口**:旧 keyless fallback 文件无法回填键,过渡窗内 `--remove-on-success` 仍必须(D4)。

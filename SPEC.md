@@ -3,7 +3,7 @@
 > 版本：v0.11（2026-06-03）
 > 状态：草案 / 规划阶段
 >
-> v0.11 变更：接受 ADR 0014（每事件 `idempotency_key` 去重,与 `id`/哈希链排序解耦）——`Event` 增 `idempotency_key` 字段(§7)。**设计已锁定、实现延后**(gate 在 #81 真触发);hook 重放幂等是其目标。详见 `docs/ADR/0014-idempotency-key-dedup.md`。
+> v0.11 变更：落地 ADR 0014（每事件 `idempotency_key` 去重,与 `id`/哈希链排序解耦）——`Event` 增 `idempotency_key` 字段(§7);`id` 一律服务端 ULID,去重轴搬到 `idempotency_key`(server `ON CONFLICT DO NOTHING`,批量遇重跳过续行,`/v1/events` 由 409 翻为 200 `{accepted}`)。hook / git / GitHub / deploy 产出方各自填键;`replay` 对升级后事件可安全重跑。详见 `docs/ADR/0014-idempotency-key-dedup.md`(#81)。
 >
 > v0.10 变更：给 `human_intervention` 第一个产出方——订阅 `PermissionRequest`（→ `permission_decision` 记权限 gate 出现，一手证据）、`PermissionDenied`（→ `decision=deny` auto 拒绝，observed）、`PostToolUseFailure`（→ `tool_result` 补齐失败工具）。`permission_mode` 入 `tool_call.authorization`。修正 0004 D2 的 `PreToolUse` 来源声明、给 `decision` 集合增 `unresolved`。allow/unresolved 的关联判定留 linker 后续。详见 `docs/ADR/0010-permission-capture.md`。
 >
@@ -93,7 +93,7 @@ Event {
   refs:    [artifact_id]
   hash, prev_hash          // 哈希链
   sig?                     // 可选签名
-  idempotency_key?         // 每事件去重键（ADR 0014，已接受、待落地）
+  idempotency_key?         // 每事件去重键(ADR 0014);产出方生成,与 id/哈希链解耦
 }
 
 Artifact {
