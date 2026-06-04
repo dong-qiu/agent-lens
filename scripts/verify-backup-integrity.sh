@@ -20,7 +20,7 @@
 #   AGENT_LENS_BIN      path to compiled `agent-lens` (defaults to
 #                       `go run ./cmd/agent-lens`, which works from repo root)
 #   AGENT_LENS_HOOK_BIN path to compiled `agent-lens-hook` (defaults to
-#                       /Users/dongqiu/go/bin/agent-lens-hook then PATH)
+#                       `go env GOBIN`/`go env GOPATH`/bin, then PATH)
 #   VERIFY_PORT         transient collector port (default 18787)
 set -euo pipefail
 
