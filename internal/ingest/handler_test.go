@@ -333,7 +333,14 @@ func TestIngestMixedBatchSkipsDupKeepsRest(t *testing.T) {
 		t.Fatalf("list: %v", err)
 	}
 	if len(events) != 2 {
-		t.Errorf("stored %d events, want 2", len(events))
+		t.Fatalf("stored %d events, want 2", len(events))
+	}
+	// The chain must stay intact across the skipped duplicate: k2 chains
+	// onto k1 (the real head), and skipping k1 must not have advanced or
+	// corrupted the head cache.
+	if events[1].PrevHash != events[0].Hash {
+		t.Errorf("chain broke across skipped dup: k2.prev_hash = %q, want k1.hash %q",
+			events[1].PrevHash, events[0].Hash)
 	}
 }
 
