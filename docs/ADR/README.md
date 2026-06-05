@@ -140,6 +140,7 @@ Patch 文件的硬性约束:
 - **0012 订阅 SessionEnd 补齐会话边界**(Accepted):`SessionEnd` 派生 `decision.session_end`(`reason`)、`SessionStart` 增采 `source`;复用既有 `decision` marker,不新增 EventKind。
 - **0013 订阅 PreCompact / PostCompact**(Accepted):compaction 从启发式 inferred 提到一手 observed;`PreCompact` 标 `provisional`、`PostCompact` 确认 `observed`、崩溃停 `provisional`;复用 0005 `context_transform`,给其 confidence 集合增 `provisional`。
 - **0014 用每事件幂等键去重,与 id / 哈希链排序解耦**(Accepted — 设计锁定、实现延后):#81——hook 不设 id 致重放重复;排序 / 链头都靠服务端 ULID(完整性载荷),故 `id` 不动、另加**每事件 ULID** `idempotency_key` 做 dedup。实现 gate 在 #81 真触发(详见 § 落地)。
+- **0015 把 skill 注入指令正文升为 `context_transform.skill_instruction_injection`**(草案):#110(#101 gap 2)——skill 展开后注入 agent 的二阶指令正文今天两条路径都漏采;实证证其以 `isMeta + sourceToolUseID` 的 user 条目到达、`sourceToolUseID == Skill tool_use.id` 作天然挂链键。复用 `context_transform` 加 sub_kind、走 ADR 0005 D2 存储,不新增 EventKind。
 
 (0003–0005 接受时的 `spec-patches-pending-0003-0005.md` 已随 #100 合入删除。)
 
